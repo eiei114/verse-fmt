@@ -148,6 +148,13 @@ fn prepare_using(
     if current.readonly {
         return Err(format!("{}: read-only file", path.display()));
     }
+    #[cfg(windows)]
+    if current.attributes & !(2 | 4 | 32 | 128 | 8192) != 0 {
+        return Err(format!(
+            "{}: unsupported Windows file attributes; compressed, encrypted, sparse or cloud-managed files are not write targets",
+            path.display()
+        ));
+    }
     if current.links != 1 {
         return Err(format!(
             "{}: hard-linked or unsupported file identity",
@@ -164,6 +171,7 @@ fn prepare_using(
         .prefix(".verse-write-")
         .tempfile_in(parent)
         .map_err(|e| e.to_string())?;
+    verify_owner_group(&guard, temporary.path()).map_err(|e| e.to_string())?;
     copy_dacl(temporary.path(), &guard)
         .map_err(|e| format!("cannot protect staged source: {e}"))?;
     write(temporary.as_file_mut(), output).map_err(|e| format!("cannot stage replacement: {e}"))?;
@@ -229,6 +237,7 @@ impl Pending {
                 path.display()
             ));
         }
+        verify_owner_group(&current, &replacement).map_err(|e| e.to_string())?;
         drop(current);
         // Disarm automatic cleanup before any call that can rename the original.
         let backup_dir = backup.keep();
@@ -362,6 +371,90 @@ fn native_restore(_backup: &Path, _path: &Path) -> io::Result<()> {
         io::ErrorKind::Unsupported,
         "Windows recovery only",
     ))
+}
+
+#[cfg(windows)]
+fn verify_owner_group(original: &File, replacement: &Path) -> io::Result<()> {
+    use std::os::windows::io::AsRawHandle;
+    use windows_sys::Win32::{
+        Foundation::LocalFree,
+        Security::{
+            Authorization::{GetNamedSecurityInfoW, GetSecurityInfo, SE_FILE_OBJECT},
+            EqualSid, GROUP_SECURITY_INFORMATION, OWNER_SECURITY_INFORMATION, PSID,
+        },
+    };
+    let (mut owner, mut group, mut descriptor) = (
+        std::ptr::null_mut(),
+        std::ptr::null_mut(),
+        std::ptr::null_mut(),
+    );
+    let flags = OWNER_SECURITY_INFORMATION | GROUP_SECURITY_INFORMATION;
+    // SAFETY: live borrowed handle; out pointers own descriptor storage, freed below.
+    let error = unsafe {
+        GetSecurityInfo(
+            original.as_raw_handle(),
+            SE_FILE_OBJECT,
+            flags,
+            &mut owner,
+            &mut group,
+            std::ptr::null_mut(),
+            std::ptr::null_mut(),
+            &mut descriptor,
+        )
+    };
+    if error != 0 {
+        return Err(io::Error::from_raw_os_error(error as i32));
+    }
+    let (mut other_owner, mut other_group, mut other_descriptor) = (
+        std::ptr::null_mut(),
+        std::ptr::null_mut(),
+        std::ptr::null_mut(),
+    );
+    let path = wide(replacement);
+    // SAFETY: live NUL-terminated path, writable out pointers.
+    let error = unsafe {
+        GetNamedSecurityInfoW(
+            path.as_ptr(),
+            SE_FILE_OBJECT,
+            flags,
+            &mut other_owner,
+            &mut other_group,
+            std::ptr::null_mut(),
+            std::ptr::null_mut(),
+            &mut other_descriptor,
+        )
+    };
+    let result = if error != 0 {
+        Err(io::Error::from_raw_os_error(error as i32))
+    } else {
+        let same = |a: PSID, b: PSID| {
+            if a.is_null() || b.is_null() {
+                a == b
+            }
+            // SAFETY: non-null SIDs belong to the still-live security descriptors.
+            else {
+                unsafe { EqualSid(a, b) != 0 }
+            }
+        };
+        if same(owner, other_owner) && same(group, other_group) {
+            Ok(())
+        } else {
+            Err(io::Error::other(
+                "cannot preserve original owner/group; refusing replacement without changing ownership",
+            ))
+        }
+    };
+    // SAFETY: both allocations come from the security APIs; null LocalFree is safe.
+    unsafe {
+        LocalFree(descriptor);
+        LocalFree(other_descriptor);
+    }
+    result
+}
+
+#[cfg(not(windows))]
+fn verify_owner_group(_original: &File, _replacement: &Path) -> io::Result<()> {
+    Ok(())
 }
 
 #[cfg(windows)]

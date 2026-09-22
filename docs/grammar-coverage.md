@@ -47,3 +47,13 @@ CST-confirmed openers; this does not distinguish failable calls from indexing
 semantically. Fixed-seed tests additionally vary indent width, BOM, EOL and
 protected Unicode, and feed bounded arbitrary bytes. Performance and UEFN
 acceptance remain separate gates.
+
+Real-project read-only inspection exposed additional practical coverage gaps:
+dotted local imports (`using { Demo.Helpers }`), comma-separated braced enums,
+and typed local constants such as `Label:string="hello"`. Self-authored minimal
+refusal regressions live in `tests/coverage-gaps.rs`; these are backlog items to
+support, not intentionally excluded language features or compiler diagnostics.
+Parser recovery can also lose enclosing structure, so an "adjacent top-level"
+error does not prove the original construct really was top-level. No private
+project sources are included in this repository. Broad UEFN-project readiness
+has not been demonstrated.

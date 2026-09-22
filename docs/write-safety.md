@@ -34,8 +34,16 @@ Validated cases include BOM/CRLF/Unicode paths, unchanged mtime, creation time,
 protected custom DACL, NTFS named stream, read-only files, Windows share locks,
 hardlinks, junctions, edits after analysis, namespace replacement, injected
 staging failure, backup restoration and a competing destination during failure.
-Unusual file ownership/group and additional filesystem behavior still require
-audit; DACL/stream tests do not establish all possible metadata preservation.
+Hidden/system/archive/not-content-indexed attributes and >260-character Unicode
+paths are tested. Before writing staged source bytes and again before replacement,
+the candidate's owner and primary group must match the original. A non-default
+group regression verifies refusal without replacing the source. The adapter does
+not elevate privileges or change original ownership to force a match.
+Only normal/hidden/system/archive/not-content-indexed attribute combinations are
+write targets; other flags (including compressed, encrypted, sparse, temporary or
+cloud-managed files) fail closed. This does not establish all metadata behavior;
+SACL auditing, unusual filesystem policies and hostile security changes remain
+unverified.
 
 Preflight failure leaves all source files unchanged. A later commit failure can
 leave earlier files successfully formatted; the CLI reports completed and
