@@ -1,4 +1,7 @@
-use std::time::{Duration, Instant};
+use std::{
+    collections::HashSet,
+    time::{Duration, Instant},
+};
 
 use tree_sitter::{Language, ParseOptions, Parser};
 use tree_sitter_language::LanguageFn;
@@ -15,6 +18,8 @@ unsafe extern "C" {
 #[derive(Debug)]
 pub struct Document {
     pub tokens: Vec<Token>,
+    pub spaced_operators: HashSet<usize>,
+    pub call_openers: HashSet<usize>,
     shape: Vec<(u16, bool)>,
 }
 
@@ -39,10 +44,31 @@ impl Document {
             )
             .ok_or_else(|| Failure::new(0, "parse budget exceeded; source was not changed"))?;
         let mut shape = Vec::new();
+        let mut spaced_operators = HashSet::new();
+        let mut call_openers = HashSet::new();
         let mut cursor = tree.walk();
         let mut depth = 0;
         loop {
             let node = cursor.node();
+            if matches!(node.kind(), "binary_expression" | "set_statement")
+                && let Some(operator) = node.child_by_field_name("operator")
+            {
+                spaced_operators.insert(operator.start_byte() + source.body_start());
+            }
+            if matches!(
+                node.kind(),
+                "call_expression"
+                    | "failable_call_expression"
+                    | "function_definition"
+                    | "extension_function_definition"
+            ) {
+                let mut children = node.walk();
+                for child in node.children(&mut children) {
+                    if matches!(child.kind(), "(" | "[") {
+                        call_openers.insert(child.start_byte() + source.body_start());
+                    }
+                }
+            }
             if node.is_error() || node.is_missing() {
                 return Err(Failure::new(
                     node.start_byte() + source.body_start(),
@@ -66,7 +92,12 @@ impl Document {
                     break;
                 }
                 if !cursor.goto_parent() {
-                    return Ok(Self { tokens, shape });
+                    return Ok(Self {
+                        tokens,
+                        shape,
+                        spaced_operators,
+                        call_openers,
+                    });
                 }
                 depth -= 1;
             }

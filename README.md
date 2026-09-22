@@ -2,27 +2,32 @@
 
 Conservative formatter for Epic Games' Verse language and UEFN projects.
 
-> Unreleased alpha under active implementation. Single-file/stdin formatting
-> and `--check` work for the supported subset. Project traversal/configuration,
-> `--diff`, safe `--write` and UEFN acceptance are not completed yet. Unsupported
-> operations and syntax fail with exit code 2; no files are modified in this slice.
+> Unreleased alpha under active implementation. File/stdin/project formatting,
+> configuration, check, diff and guarded Windows writes work for a bounded
+> syntax subset. UEFN compiler acceptance, full corpus testing and distribution
+> checks are still pending. Unsupported syntax fails with exit code 2.
 
-## First supported slice
+## Usage
 
 ```powershell
 cargo run -- path/to/device.verse          # formatted UTF-8 to stdout
 cargo run -- path/to/device.verse --check  # exit 0 clean, 1 needs formatting, 2 failure
+cargo run -- . --diff                     # preview project changes
+cargo run -- . --write                    # modify eligible sources after preflight
+cargo run -- --show-config                # effective verse.toml settings
 ```
 
 `-` reads UTF-8 stdin. `--stdin-filepath` supplies a virtual name only. Prefer
 file input on Windows PowerShell 5.1, whose pipelines/redirection may change
 encoding. Strings/comments, BOM and LF/CRLF are preserved; mixed line endings
-are rejected. The initial layout only fixes assignment spacing, unprotected
-trailing whitespace and the final newline. It does not reindent blocks yet.
+are rejected. Layout includes conservative four-space block indentation,
+CST-confirmed operator/call spacing, separators, unprotected trailing whitespace,
+blank-line runs and the final newline. Ambiguous indentation is rejected.
 
 Every result is reparsed and checked for token/structure preservation and
 idempotence. See [parser design](docs/parser-design.md) and
-[coverage/limitations](docs/grammar-coverage.md). This is not a compiler.
+[coverage/limitations](docs/grammar-coverage.md), [CLI/config](docs/cli.md) and
+[Windows write safety](docs/write-safety.md). This is not a compiler.
 
 ## Development
 
@@ -40,6 +45,10 @@ cargo run -- --help
 Tests and the release build do not replace manual UEFN acceptance. CI never
 publishes packages or creates releases. `verse-fmt.dev` is a planned, unregistered
 project domain, not an active homepage.
+
+The verification script resolves the pinned toolchain through rustup and forces
+its compiler path. This avoids an unrelated mise/direct Rust binary earlier in
+PATH silently overriding the repository pin.
 
 The project is community-built and is not affiliated with or endorsed by Epic Games.
 

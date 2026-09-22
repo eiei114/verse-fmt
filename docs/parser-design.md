@@ -1,16 +1,21 @@
 # Parser decision: pinned CST plus an independent lexical guard
 
-Status: implemented for the first read-only formatter slice. UEFN acceptance
+Status: implemented for the bounded formatter, including guarded writes. UEFN acceptance
 is pending. This is not an assertion of full Verse grammar coverage.
 
 ## Evidence
 
 We compiled `taku25/tree-sitter-verse` revision
 `6b5433e37b52c03c4c07f9468bf7cc11e45f2f82` with tree-sitter 0.25.10 on Rust
-1.97.0, Windows MSVC. A self-authored 14-case probe covered a minimal device,
+1.98.1, Windows MSVC. A self-authored 14-case probe covered a minimal device,
 2-space indentation, nested comments, unterminated comments, nested string
 interpolation, `<#>` comments, Unicode identifiers, paths, dot blocks, markup,
 tabs, braced function bodies, typed top-level values and sibling methods.
+
+Correction: the original probe was initially attributed to the repository's
+1.97.0 pin, but a direct Rust binary earlier in PATH actually ran 1.98.1. The
+verification script now explicitly resolves rustup's pinned compiler; the full
+current regression suite and release build have since passed on 1.97.0.
 
 The important observations were:
 
@@ -64,9 +69,12 @@ interpolation, nested comments or block ownership and was rejected.
 6. Render again and require byte-identical output. Refuse source output/write
    on a failed invariant rather than falling back to an unsafe formatter.
 
-The first layout slice never changes indentation or interior line breaks.
-Subsequent indentation work must add independent line/block checks and extend
-regression fixtures; CST comparison alone is not a proof of language semantics.
+The layout now compares an independent normalized per-code-line indentation
+signature before and after rendering. Structural indentation increases require
+a recognized block introducer; tabs and ambiguous continuations fail closed.
+Delimited continuations and protected multiline interiors retain indentation.
+This is deliberately narrower than the complete language. CST comparison and
+the indentation signature are not proofs of language semantics.
 Compiler/build and runtime checks in UEFN remain separate required gates.
 
 ## Reproducible checks
