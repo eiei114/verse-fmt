@@ -1,0 +1,8 @@
+verse-fmt is a community project, not affiliated with Epic Games.
+
+This distribution contains tree-sitter-verse by taku25, licensed under MIT.
+Copyright (c) 2025 taku25
+The full license is retained in vendor/tree-sitter-verse/LICENSE and must be
+included alongside the program in binary distributions.
+
+Tree-sitter and the Rust dependencies are used under their respective licenses.

@@ -1,0 +1,3 @@
+* text=auto eol=lf
+# Fixture bytes (including deliberate BOM/CRLF) are test inputs, not text to normalize.
+*.verse -text

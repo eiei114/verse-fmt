@@ -2,9 +2,27 @@
 
 Conservative formatter for Epic Games' Verse language and UEFN projects.
 
-> Unreleased alpha under active implementation. Only CLI validation is implemented
-> in this foundation commit. Source processing currently fails with exit code 2;
-> it does not claim to format or validate Verse. No files are modified.
+> Unreleased alpha under active implementation. Single-file/stdin formatting
+> and `--check` work for the supported subset. Project traversal/configuration,
+> `--diff`, safe `--write` and UEFN acceptance are not completed yet. Unsupported
+> operations and syntax fail with exit code 2; no files are modified in this slice.
+
+## First supported slice
+
+```powershell
+cargo run -- path/to/device.verse          # formatted UTF-8 to stdout
+cargo run -- path/to/device.verse --check  # exit 0 clean, 1 needs formatting, 2 failure
+```
+
+`-` reads UTF-8 stdin. `--stdin-filepath` supplies a virtual name only. Prefer
+file input on Windows PowerShell 5.1, whose pipelines/redirection may change
+encoding. Strings/comments, BOM and LF/CRLF are preserved; mixed line endings
+are rejected. The initial layout only fixes assignment spacing, unprotected
+trailing whitespace and the final newline. It does not reindent blocks yet.
+
+Every result is reparsed and checked for token/structure preservation and
+idempotence. See [parser design](docs/parser-design.md) and
+[coverage/limitations](docs/grammar-coverage.md). This is not a compiler.
 
 ## Development
 
