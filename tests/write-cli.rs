@@ -92,6 +92,28 @@ fn a_windows_file_lock_fails_without_truncation() {
 
 #[cfg(windows)]
 #[test]
+fn readable_delete_denial_is_found_before_any_batch_write() {
+    use std::os::windows::fs::OpenOptionsExt;
+    let root = tempfile::tempdir().unwrap();
+    let a = root.path().join("a.verse");
+    let z = root.path().join("z.verse");
+    fs::write(&a, b"A:=1\n").unwrap();
+    fs::write(&z, b"Z:=2\n").unwrap();
+    let guard = fs::OpenOptions::new()
+        .read(true)
+        .share_mode(1)
+        .open(&z)
+        .unwrap();
+    let out = run(root.path(), &[".", "--write"]);
+    drop(guard);
+    assert_eq!(out.status.code(), Some(2), "{out:?}");
+    assert_eq!(fs::read(&a).unwrap(), b"A:=1\n");
+    assert_eq!(fs::read(&z).unwrap(), b"Z:=2\n");
+    assert_eq!(fs::read_dir(root.path()).unwrap().count(), 2);
+}
+
+#[cfg(windows)]
+#[test]
 fn junctions_and_paths_through_them_are_refused() {
     let root = tempfile::tempdir().unwrap();
     let actual = root.path().join("actual");

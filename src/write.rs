@@ -121,6 +121,9 @@ fn open_guard(path: &Path) -> io::Result<File> {
         use std::os::windows::fs::OpenOptionsExt;
         // Deny concurrent writers while permitting our rename/replacement.
         options.share_mode(1 | 4); // FILE_SHARE_READ | FILE_SHARE_DELETE
+        // Request DELETE now, so an existing read-only sharing handle that
+        // denies replacement fails during all-file preflight, not mid-batch.
+        options.access_mode(0x8000_0000 | 0x0001_0000); // GENERIC_READ | DELETE
     }
     options.open(path)
 }

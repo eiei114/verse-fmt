@@ -10,7 +10,9 @@ deliberately disabled. UEFN and clean-machine verification remain separate.
 2. Analyze all candidates and validate lexical/CST/indentation equivalence and
    idempotence. Do not write unchanged files, preserving their modification time.
 3. Preflight every changed file before the first replacement. Refuse read-only
-   files and hardlinks; hold read handles denying writes but permitting delete.
+   files and hardlinks; hold read/DELETE handles denying writes but permitting delete.
+   Request DELETE access during preflight so a readable handle denying
+   replacement fails before any file in the batch is written.
    Recheck original stamp and bytes. Stage same-directory output and a synced
    original-byte recovery copy. Apply source DACL/protection to scratch files
    before storing source bytes there; never alter the source ACL during staging.
