@@ -5,6 +5,8 @@ mod format;
 mod indent;
 mod lex;
 mod report;
+#[cfg(test)]
+mod robustness;
 mod source;
 mod syntax;
 mod write;

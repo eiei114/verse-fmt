@@ -63,6 +63,9 @@ interpolation, nested comments or block ownership and was rejected.
    seconds, CST depth to 512 and fingerprint events to 1,000,000.
 4. Reject every ERROR or MISSING CST node. Unknown constructs fail with exit 2;
    they are not silently copied and reported as supported.
+   Also reject unseparated same-line top-level nodes. Corpus investigation found
+   the pinned grammar can parse a top-level inline function's `X+Y` as body X
+   followed by a separate unary +Y, without any ERROR. Do not trust that tree.
 5. Reparse output and compare the full CST shape and all non-trivia lexical
    tokens, including exact literal/comment bytes. Tree comparison detects
    changing a method's containing block even with identical code tokens.
@@ -83,3 +86,12 @@ Compiler/build and runtime checks in UEFN remain separate required gates.
 `tests/fixtures/provenance.md` records authorship. Upstream identity/hashes and
 license are in `vendor/tree-sitter-verse/upstream.md`. Local probe logs under
 `target/research` are supplemental, not required to rebuild or run tests.
+
+## Expanded corpus
+
+`tests/fixtures/corpus.json` contains 65 self-authored named cases: 45 independent
+golden layouts and 20 refusals (malformed input and known unsupported forms,
+clearly categorized). The corpus test invokes the real CLI and rechecks every
+successful output for idempotence. This is tool coverage, not UEFN acceptance.
+`src/robustness.rs` adds fixed-seed structured and arbitrary-byte checks plus
+bounded resource cases. See fixture provenance for exact counts and seeds.

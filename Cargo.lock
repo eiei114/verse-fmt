@@ -568,6 +568,7 @@ dependencies = [
  "pathdiff",
  "same-file",
  "serde",
+ "serde_json",
  "similar",
  "tempfile",
  "toml",
