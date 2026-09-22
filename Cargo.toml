@@ -1,13 +1,15 @@
 [package]
 name = "verse-fmt"
-version = "0.1.0"
+version = "0.1.0-alpha.1"
 edition = "2024"
+rust-version = "1.97"
 description = "A conservative formatter for Epic Games' Verse language."
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/eiei114/verse-fmt"
-homepage = "https://verse-fmt.dev"
+homepage = "https://github.com/eiei114/verse-fmt"
 readme = "README.md"
 keywords = ["verse", "uefn", "formatter"]
 categories = ["command-line-utilities", "development-tools"]
 
 [dependencies]
+clap = { version = "4.5", features = ["derive"] }
