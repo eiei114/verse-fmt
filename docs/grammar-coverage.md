@@ -21,6 +21,7 @@ The tool is an unreleased alpha and never replaces the UEFN compiler.
 | Quoted or non-ASCII identifiers | Unsupported, exit 2 | Lexer/grammar coverage limit |
 | Multiline string literals outside interpolation | Unsupported, exit 2 | Strict lexical policy |
 | Top-level typed `Count:int=1` | Unsupported by pinned grammar, exit 2 | Grammar probe/regression |
+| String beginning with unescaped `#`, e.g. `A := "# text"` | Pinned scanner may misclassify; fails coverage checks, exit 2 | Linter rule investigation; never alter the literal to make it parse |
 | Malformed/unclosed input | Rejected, exit 2 | Recovery, delimiter, quote tests |
 | Mixed LF/CRLF, UTF-16, invalid UTF-8, NUL | Rejected, exit 2 | Source and CLI tests |
 

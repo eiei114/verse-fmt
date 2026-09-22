@@ -68,6 +68,7 @@ fn rejects_incomplete_or_unsupported_input_without_partial_output() {
         b"\xff",
         b"A:=1\0\n",
         b"Text:=<p>Hello</p>\n",
+        b"A := \"# text\"\n",
     ] {
         let out = stdin(input, &[]);
         assert_eq!(out.status.code(), Some(2), "{input:?}: {out:?}");
