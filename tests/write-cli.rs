@@ -12,6 +12,7 @@ fn run(root: &Path, args: &[&str]) -> Output {
         .unwrap()
 }
 
+#[cfg(windows)]
 #[test]
 fn writes_and_then_leaves_mtime_unchanged() {
     let root = tempfile::tempdir().unwrap();
