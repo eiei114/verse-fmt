@@ -88,9 +88,10 @@ def run_sample(command, cwd):
 
 def optional_run(command, **kwargs):
     """Run an optional metadata probe; missing executables mean unavailable metadata."""
+    kwargs.setdefault("timeout", 30)
     try:
         return subprocess.run(command, **kwargs)
-    except FileNotFoundError:
+    except (FileNotFoundError, subprocess.TimeoutExpired):
         return None
 
 def git_head(path):
@@ -117,7 +118,10 @@ def main():
     worktree = Path(__file__).resolve().parents[1]
     versions = {}
     for name, binary in binaries.items():
-        versions[name] = subprocess.run([str(binary), "--version"], capture_output=True, text=True, check=True).stdout.strip()
+        versions[name] = subprocess.run(
+            [str(binary), "--version"], capture_output=True, text=True,
+            check=True, timeout=60,
+        ).stdout.strip()
     toolchain = optional_run(["rustup", "run", "1.97.0", "rustc", "-Vv"],
                              capture_output=True, text=True)
     pwsh = optional_run(["pwsh", "-NoProfile", "-Command", "$PSVersionTable.PSVersion.ToString()"],

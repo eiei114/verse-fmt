@@ -34,6 +34,28 @@ def copy_new(source: Path, destination: Path) -> None:
         raise
 
 
+def pinned_build_environment(toolchain_bin: Path, channel: str) -> dict[str, str]:
+    environment = os.environ.copy()
+    for name in list(environment):
+        if (
+            name in {
+                "CARGO_BUILD_TARGET",
+                "CARGO_ENCODED_RUSTFLAGS",
+                "RUSTFLAGS",
+                "RUSTC_BOOTSTRAP",
+                "RUSTC_WRAPPER",
+                "RUSTC_WORKSPACE_WRAPPER",
+            }
+            or name.startswith(("CARGO_TARGET_", "CARGO_PROFILE_"))
+        ):
+            environment.pop(name)
+    environment["PATH"] = str(toolchain_bin) + os.pathsep + environment.get("PATH", "")
+    environment["RUSTUP_TOOLCHAIN"] = channel
+    environment["RUSTC"] = str(toolchain_bin / ("rustc.exe" if os.name == "nt" else "rustc"))
+    environment["RUSTDOC"] = str(toolchain_bin / ("rustdoc.exe" if os.name == "nt" else "rustdoc"))
+    return environment
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
@@ -45,10 +67,14 @@ def main() -> int:
 
     root = Path(__file__).resolve().parents[1]
     output_dir = args.output_dir.resolve()
-    commit = subprocess.run(["git", "-C", str(root), "rev-parse", "--verify", "HEAD"],
-                            capture_output=True, text=True, check=True).stdout.strip()
-    dirty = subprocess.run(["git", "-C", str(root), "status", "--porcelain", "--untracked-files=normal"],
-                           capture_output=True, text=True, check=True).stdout.strip()
+    commit = subprocess.run(
+        ["git", "-C", str(root), "rev-parse", "--verify", "HEAD"],
+        capture_output=True, text=True, encoding="utf-8", check=True, timeout=30,
+    ).stdout.strip()
+    dirty = subprocess.run(
+        ["git", "-C", str(root), "status", "--porcelain", "--untracked-files=normal"],
+        capture_output=True, text=True, encoding="utf-8", check=True, timeout=30,
+    ).stdout.strip()
     if dirty:
         raise SystemExit("package from a clean commit; commit source/docs before packaging")
     if args.binary is not None:
@@ -68,20 +94,21 @@ def main() -> int:
     ).stdout.strip()
     toolchain_bin = Path(rustc).parent
     cargo = toolchain_bin / ("cargo.exe" if os.name == "nt" else "cargo")
-    build_env = os.environ.copy()
-    build_env["PATH"] = str(toolchain_bin) + os.pathsep + build_env.get("PATH", "")
-    build_env["RUSTUP_TOOLCHAIN"] = channel
-    build_env["RUSTC"] = str(toolchain_bin / ("rustc.exe" if os.name == "nt" else "rustc"))
-    build_env["RUSTDOC"] = str(toolchain_bin / ("rustdoc.exe" if os.name == "nt" else "rustdoc"))
+    build_env = pinned_build_environment(toolchain_bin, channel)
     subprocess.run(
-        [str(cargo), "build", "--release", "--locked", "--target", TARGET],
+        [
+            str(cargo), "build", "--release", "--locked", "--target", TARGET,
+            "--target-dir", str(root / "target"),
+        ],
         cwd=root, env=build_env, check=True, timeout=1800,
     )
     binary = root / DEFAULT_BINARY
     if not binary.is_file():
         raise SystemExit(f"release binary not produced: {binary}")
 
-    version_result = subprocess.run([str(binary), "--version"], capture_output=True, check=True)
+    version_result = subprocess.run(
+        [str(binary), "--version"], capture_output=True, check=True, timeout=60,
+    )
     version_text = version_result.stdout.decode("utf-8", errors="strict").strip()
     match = re.fullmatch(rf"{TOOL} ([0-9A-Za-z.+-]+)", version_text)
     if not match:
@@ -147,13 +174,15 @@ def main() -> int:
                     "PATH": str(Path(system_root) / "System32") + os.pathsep + system_root,
                 }
                 smoke_version = subprocess.run([str(smoke_binary), "--version"], cwd=smoke_root,
-                                                env=smoke_env, capture_output=True, check=True)
+                                                env=smoke_env, capture_output=True, check=True,
+                                                timeout=60)
                 if smoke_version.stdout.decode("utf-8", errors="strict").strip() != version_text:
                     raise RuntimeError("extracted binary version differs from packaged binary")
                 smoke_source = smoke_root / "smoke.verse"
                 smoke_source.write_bytes(b"A := 1\n")
                 smoke_check = subprocess.run([str(smoke_binary), "--check", str(smoke_source)],
-                                             cwd=smoke_root, env=smoke_env, capture_output=True)
+                                             cwd=smoke_root, env=smoke_env, capture_output=True,
+                                             timeout=60)
                 if smoke_check.returncode != 0:
                     raise RuntimeError("extracted binary failed direct --check smoke test")
         if staged_checksum.read_text(encoding="ascii") != f"{sha256(staged_archive.read_bytes())}  {archive_name}\n":
