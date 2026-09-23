@@ -30,6 +30,18 @@ fn practical_syntax_has_golden_output_and_is_idempotent() {
             "F():void =\n    Count := 1\n    Label:string = \"{Count}\"\n",
         ),
         ("Count:int=1\n", "Count:int = 1\n"),
+        (
+            "Empty<public>:=class():\n  Value : int=1\n",
+            "Empty<public> := class():\n    Value:int = 1\n",
+        ),
+        (
+            "Check():void=\n    if:\n        Value:=1\n    then:\n        Print(\"ok\")\n",
+            "Check():void =\n    if:\n        Value := 1\n    then:\n        Print(\"ok\")\n",
+        ),
+        (
+            "Build():void=\n  Canvas:canvas=canvas:\n    Slots:=array:\n      canvas_slot:\n        ZOrder:={Z:=5}\n",
+            "Build():void =\n    Canvas:canvas = canvas:\n        Slots := array:\n            canvas_slot:\n                ZOrder := {Z := 5}\n",
+        ),
     ] {
         for source in [source, expected] {
             let dir = tempfile::tempdir().unwrap();

@@ -51,6 +51,14 @@ module.exports = grammar({
     [$._callable_expression, $._expression],
     [$.function_definition, $.type_definition, $._callable_expression, $._expression],
     [$.function_definition, $.type_definition, $._callable_expression],
+    [$.constant_declaration, $._expression],
+    [$.attribute],
+    [$.module_scoped_identifier, $._literal],
+    [$.receiver_parameter, $.module_scoped_identifier, $._expression],
+    [$.module_scoped_identifier, $._expression],
+    [$._expression, $.for_iterator],
+    [$._type, $.function_type, $.constrained_type],
+    [$.type_definition, $.field_initializer],
   ],
 
   rules: {
@@ -235,8 +243,10 @@ module.exports = grammar({
       optional(field('specifiers', $.specifier_list)),
       optional(seq(
         '(',
-        field('base', $._type),
-        repeat(seq(',', field('base', $._type))),
+        optional(seq(
+          field('base', $._type),
+          repeat(seq(',', field('base', $._type))),
+        )),
         ')',
       )),
       $._type_body,
@@ -645,6 +655,7 @@ module.exports = grammar({
       $.member_access,
       $.index_expression,
       $.object_construction,
+      $.struct_literal,
       $.array_literal,
       $.logic_literal,
       $.option_expression,
@@ -752,14 +763,35 @@ module.exports = grammar({
 
     object_construction: $ => prec.left(PREC.CALL, seq(
       field('type', $._expression),
-      '{',
-      optional(field('fields', $.field_initializer_list)),
-      '}',
+      choice(
+        seq(
+          '{',
+          optional(field('fields', $.field_initializer_list)),
+          '}',
+        ),
+        seq(
+          ':',
+          $._indent,
+          field('fields', $.field_initializer_block),
+          $._dedent,
+        ),
+      ),
     )),
 
     field_initializer_list: $ => seq(
       $.field_initializer,
       repeat(seq(',', $.field_initializer)),
+    ),
+
+    field_initializer_block: $ => seq(
+      $.field_initializer,
+      repeat($.field_initializer),
+    ),
+
+    struct_literal: $ => seq(
+      '{',
+      $.field_initializer_list,
+      '}',
     ),
 
     field_initializer: $ => seq(
@@ -786,14 +818,24 @@ module.exports = grammar({
     ),
 
     // array{expr, ...}
-    array_literal: $ => seq(
-      'array',
-      '{',
-      optional(seq(
+    array_literal: $ => choice(
+      seq(
+        'array',
+        '{',
+        optional(seq(
+          $._expression,
+          repeat(seq(',', $._expression)),
+        )),
+        '}',
+      ),
+      seq(
+        'array',
+        ':',
+        $._indent,
         $._expression,
-        repeat(seq(',', $._expression)),
-      )),
-      '}',
+        repeat($._expression),
+        $._dedent,
+      ),
     ),
 
     // logic{expr; expr} — converts failable to bool
@@ -861,8 +903,17 @@ module.exports = grammar({
     )),
 
     if_condition: $ => seq(
+      $._if_condition_item,
+      repeat(seq(',', $._if_condition_item)),
+    ),
+
+    _if_condition_item: $ => choice(
+      seq(
+        field('name', $.identifier),
+        ':=',
+        field('value', $._expression),
+      ),
       $._expression,
-      repeat(seq(',', $._expression)),
     ),
 
     for_expression: $ => seq(

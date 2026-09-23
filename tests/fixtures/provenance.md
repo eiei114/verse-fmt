@@ -10,7 +10,7 @@ They use the project's MIT OR Apache-2.0 license.
 UEFN compile and runtime acceptance have not yet been performed. Parser and
 formatter test success must not be presented as UEFN acceptance.
 
-`corpus.json` adds 71 named, categorized self-authored cases with independent
+`corpus.json` adds 74 named, categorized self-authored cases with independent
 golden outputs or explicit rejection expectations. Categories cover encodings,
 declarations, literals, expressions, collections, attributes/specifiers,
 statements/control, block ownership/layout and protected spans. Rejection rows
@@ -18,8 +18,10 @@ include both malformed input and known valid-but-unsupported forms; these are
 not interchangeable compiler claims. Map literals and top-level inline binary
 function bodies were investigated after the first run failed; raw probe evidence
 identified upstream grammar gaps. Dotted local imports, initialized typed
-constants, and comma-separated braced enums now use a documented local grammar
-delta with independent positive and malformed-input regressions. Map literals
+constants, comma-separated braced enums, empty class base lists, if-binding
+conditions, and tested indented object/array construction with anonymous field
+initializers now use a documented local grammar delta with independent positive
+regressions. Map literals
 and the top-level binary-function ambiguity remain conservatively rejected.
 
 `src/robustness.rs` uses fixed xorshift seeds (recorded in code), 256 structured
