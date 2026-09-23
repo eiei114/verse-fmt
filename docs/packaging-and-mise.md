@@ -1,10 +1,12 @@
 # Local Windows package and mise example
 
-`scripts/package.py` creates a deterministic, local-only ZIP from a pinned
-Windows release binary. It does not create a tag, GitHub Release, crate, or
+`scripts/package.py` creates a deterministic, local-only ZIP from a fresh
+Windows release build. It does not create a tag, GitHub Release, crate, or
 published artifact. The script refuses dirty source trees and existing output
-files; commit the source, run the verification build, then package that exact
-checkout:
+files, resolves the Rust channel pinned in `rust-toolchain.toml`, rebuilds the
+default binary, and stages the archive until CRC/content/smoke/checksum checks
+pass. Custom `--binary` inputs are rejected because their source provenance
+cannot be established. Run from a committed checkout:
 
 ```powershell
 pwsh -NoProfile -File scripts/verify.ps1
@@ -15,6 +17,7 @@ Output goes under ignored `target/packages/` by default. Archive name follows
 `verse-fmt-v<VERSION>-x86_64-pc-windows-msvc.zip`; the executable is at ZIP
 root with `README.md`, `BUILD-INFO.txt`, license texts, `NOTICE`, and `docs/`.
 A sibling `.sha256` file is generated and verified against the exact archive.
+The archive includes both vendored Tree-sitter license files named in `NOTICE`.
 ZIP entry order and timestamps are normalized. Local packaging verifies CRC,
 the full entry list and every archived byte. The checksum identifies this
 artifact; it is not a signature or trust assertion.

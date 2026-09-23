@@ -246,6 +246,19 @@ impl Pending {
         drop(guard);
         match result {
             Ok(()) => {
+                // ReplaceFileW moves whichever file held `path` at call time.
+                // Keep both recovery copies if a concurrent rename won the gap
+                // between our final snapshot check and the atomic replacement.
+                let replaced_original = Snapshot::read(&backup_file).is_ok_and(|saved| {
+                    saved.bytes == snapshot.bytes && saved.stamp == snapshot.stamp
+                });
+                if !replaced_original {
+                    return Err(format!(
+                        "{}: destination changed during replacement; replaced destination and recovery copy retained at {}",
+                        path.display(),
+                        backup_dir.display()
+                    ));
+                }
                 if let Err(e) = clean_backup(&backup_dir) {
                     return Ok(Some(format!(
                         "saved {}; backup cleanup failed ({e}); recovery retained at {}",
@@ -609,6 +622,39 @@ mod tests {
             .map(|e| e.unwrap().path())
             .find(|p| p.is_dir())
             .unwrap();
+        assert_eq!(fs::read(backup.join("recovery.verse")).unwrap(), b"A:=1\n");
+    }
+
+    #[test]
+    fn successful_replace_retains_unexpected_concurrent_destination() {
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("a.verse");
+        let displaced = root.path().join("displaced.verse");
+        fs::write(&path, b"A:=1\n").unwrap();
+        let pending = prepare(Snapshot::read(&path).unwrap(), b"A := 1\n").unwrap();
+        let result = pending.commit_using(|path, replacement, backup| {
+            fs::rename(path, &displaced)?;
+            fs::write(path, b"concurrent user edit")?;
+            fs::rename(path, backup)?;
+            fs::rename(replacement, path)?;
+            Ok(())
+        });
+        let message = result.unwrap_err();
+        assert!(
+            message.contains("replaced destination and recovery copy retained"),
+            "{message}"
+        );
+        assert_eq!(fs::read(&path).unwrap(), b"A := 1\n");
+        assert_eq!(fs::read(&displaced).unwrap(), b"A:=1\n");
+        let backup = fs::read_dir(root.path())
+            .unwrap()
+            .map(|entry| entry.unwrap().path())
+            .find(|candidate| candidate.is_dir())
+            .unwrap();
+        assert_eq!(
+            fs::read(backup.join("original.verse")).unwrap(),
+            b"concurrent user edit"
+        );
         assert_eq!(fs::read(backup.join("recovery.verse")).unwrap(), b"A:=1\n");
     }
 }
