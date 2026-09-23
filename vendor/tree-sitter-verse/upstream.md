@@ -15,14 +15,17 @@ No Epic proprietary grammar or compiler is redistributed. Updates require an
 explicit revision/hash change and regression tests, not a build-time download.
 
 Local reproducible delta from that source revision: allow local dotted names in
-`using { ... }`, recognize initialized typed constants at file scope and inside
-executable blocks, allow comma-separated braced enum variants, and generate
-ABI-15 parser metadata. The generated parser requires the upstream tree-sitter
+`using { ... }`, initialized typed constants at file scope and in executable
+blocks, comma-separated braced enum variants, empty class base lists, if-binding
+conditions, failable indexed `set` conditions, key/value iterators, and tested
+indented object/array construction with anonymous field initializers. Generated
+metadata targets ABI 15. The generated parser requires the upstream tree-sitter
 0.25.10 runtime headers retained in `LICENSE-tree-sitter` under their separate
 MIT notice. The scanner remains byte-identical. `hashes.json` pins every grammar,
-generated output, header, and license. Regeneration uses `scripts/verify-grammar.ps1
--Regenerate`; compare its generated hashes with the manifest. Normal Cargo builds
-remain offline from the grammar/tool and use the committed generated C.
+generated output, header, and license. Regeneration uses
+`scripts/verify-grammar.ps1 -Regenerate`; compare its generated hashes with the
+manifest. Normal Cargo builds remain offline from the grammar/tool and use the
+committed generated C.
 
 The pinned base parser is not a Verse compiler and its recovery behavior remains
 insufficient for formatting safety by itself; see `../../docs/parser-design.md`.

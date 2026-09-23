@@ -913,6 +913,7 @@ module.exports = grammar({
         ':=',
         field('value', $._expression),
       ),
+      $.set_statement,
       $._expression,
     ),
 
@@ -934,10 +935,19 @@ module.exports = grammar({
       $._expression,
     ),
 
-    for_iterator: $ => seq(
-      field('variable', $.identifier),
-      choice(':', '->'),
-      field('iterable', $._expression),
+    for_iterator: $ => choice(
+      seq(
+        field('key', $.identifier),
+        '->',
+        field('value', $.identifier),
+        ':',
+        field('iterable', $._expression),
+      ),
+      seq(
+        field('variable', $.identifier),
+        choice(':', '->'),
+        field('iterable', $._expression),
+      ),
     ),
 
     loop_expression: $ => seq('loop', field('body', $._control_block)),

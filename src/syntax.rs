@@ -20,6 +20,7 @@ pub struct Document {
     pub tokens: Vec<Token>,
     pub spaced_operators: HashSet<usize>,
     pub call_openers: HashSet<usize>,
+    pub spaced_for_separators: HashSet<usize>,
     shape: Vec<(u16, bool)>,
 }
 
@@ -74,6 +75,7 @@ impl Document {
         let mut shape = Vec::new();
         let mut spaced_operators = HashSet::new();
         let mut call_openers = HashSet::new();
+        let mut spaced_for_separators = HashSet::new();
         let mut cursor = tree.walk();
         let mut depth = 0;
         loop {
@@ -95,6 +97,14 @@ impl Document {
                 for child in node.children(&mut children) {
                     if matches!(child.kind(), "(" | "[") {
                         call_openers.insert(child.start_byte() + source.body_start());
+                    }
+                }
+            }
+            if node.kind() == "for_iterator" {
+                let mut children = node.walk();
+                for child in node.children(&mut children) {
+                    if child.kind() == ":" {
+                        spaced_for_separators.insert(child.start_byte() + source.body_start());
                     }
                 }
             }
@@ -126,6 +136,7 @@ impl Document {
                         shape,
                         spaced_operators,
                         call_openers,
+                        spaced_for_separators,
                     });
                 }
                 depth -= 1;
@@ -223,6 +234,54 @@ mod tests {
                 ("Outside", "file")
             ]
         );
+    }
+
+    #[test]
+    fn set_condition_and_key_value_iterator_keep_their_owners() {
+        let text = "F():void =\n    if (set Values[Index] = Value):\n        Print(\"ok\")\n    for (Key -> Value : Values):\n        Print(Value)\n";
+        let (_, _) = parsed(text);
+        let mut parser = Parser::new();
+        // SAFETY: same statically linked grammar as production.
+        let language = Language::new(unsafe { LanguageFn::from_raw(tree_sitter_verse) });
+        parser.set_language(&language).unwrap();
+        let tree = parser.parse(text, None).unwrap();
+        let mut pending = vec![tree.root_node()];
+        let mut nodes = Vec::new();
+        while let Some(node) = pending.pop() {
+            let mut cursor = node.walk();
+            pending.extend(node.named_children(&mut cursor));
+            nodes.push(node);
+        }
+
+        let set = nodes
+            .iter()
+            .find(|node| node.kind() == "set_statement")
+            .unwrap();
+        assert_eq!(set.parent().unwrap().kind(), "if_condition");
+        assert_eq!(
+            set.child_by_field_name("target")
+                .unwrap()
+                .utf8_text(text.as_bytes())
+                .unwrap(),
+            "Values[Index]"
+        );
+
+        let iterator = nodes
+            .iter()
+            .find(|node| node.kind() == "for_iterator")
+            .unwrap();
+        assert_eq!(iterator.parent().unwrap().kind(), "for_clause_list");
+        for (field, expected) in [("key", "Key"), ("value", "Value"), ("iterable", "Values")] {
+            assert_eq!(
+                iterator
+                    .child_by_field_name(field)
+                    .unwrap()
+                    .utf8_text(text.as_bytes())
+                    .unwrap(),
+                expected,
+                "field {field}"
+            );
+        }
     }
 
     #[test]

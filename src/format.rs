@@ -140,6 +140,11 @@ fn gap(source: &Source, document: &Document, left: &Token, right: &Token) -> Opt
     }
     let a = left.text(source);
     let b = right.text(source);
+    if document.spaced_for_separators.contains(&left.range.start)
+        || document.spaced_for_separators.contains(&right.range.start)
+    {
+        return Some(" ");
+    }
     if assignment(a)
         || assignment(b)
         || document.spaced_operators.contains(&left.range.start)

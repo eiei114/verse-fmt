@@ -42,6 +42,14 @@ fn practical_syntax_has_golden_output_and_is_idempotent() {
             "Build():void=\n  Canvas:canvas=canvas:\n    Slots:=array:\n      canvas_slot:\n        ZOrder:={Z:=5}\n",
             "Build():void =\n    Canvas:canvas = canvas:\n        Slots := array:\n            canvas_slot:\n                ZOrder := {Z := 5}\n",
         ),
+        (
+            "F():void=\n  if (set Values[Index] = Value):\n    Print(\"ok\")\n",
+            "F():void =\n    if (set Values[Index] = Value):\n        Print(\"ok\")\n",
+        ),
+        (
+            "F():void=\n  for (Key -> Value : Values):\n    Print(Value)\n",
+            "F():void =\n    for (Key -> Value : Values):\n        Print(Value)\n",
+        ),
     ] {
         for source in [source, expected] {
             let dir = tempfile::tempdir().unwrap();

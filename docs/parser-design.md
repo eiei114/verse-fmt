@@ -56,8 +56,9 @@ interpolation, nested comments or block ownership and was rejected.
 The base grammar missed practical forms found in a user-provided project. The
 local grammar delta adds dotted local imports, initialized typed constants at
 file scope/executable blocks, comma-separated braced enum variants, empty class
-base lists, if-binding conditions, and tested indented object/array construction
-with anonymous field initializers. Its scanner is unchanged. Generated parser C targets ABI 15 and retains the
+base lists, if-binding conditions, failable indexed `set` conditions, tested
+key/value iterators, and indented object/array construction with anonymous field
+initializers. Its scanner is unchanged. Generated parser C targets ABI 15 and retains the
 tree-sitter 0.25.10 runtime header/license. `vendor/tree-sitter-verse/hashes.json`
 pins all grammar/generated/header/license bytes; maintainer regeneration uses
 `scripts/verify-grammar.ps1 -Regenerate`. Ordinary builds need no Node/npm.
@@ -99,7 +100,7 @@ license are in `vendor/tree-sitter-verse/upstream.md`. Local probe logs under
 
 ## Expanded corpus
 
-`tests/fixtures/corpus.json` contains 74 self-authored named cases: 56 independent
+`tests/fixtures/corpus.json` contains 76 self-authored named cases: 58 independent
 golden layouts and 18 refusals (malformed input and known unsupported forms,
 clearly categorized). The corpus test invokes the real CLI and rechecks every
 successful output for idempotence. This is tool coverage, not UEFN acceptance.
