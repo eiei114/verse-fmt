@@ -76,10 +76,25 @@ impl Document {
         let mut spaced_operators = HashSet::new();
         let mut call_openers = HashSet::new();
         let mut spaced_for_separators = HashSet::new();
+        // A recovery-free tree can still interpret <#...#> as operators and
+        // line comments. Every independent lexical block comment must have
+        // the same complete span in the CST before any output or write.
+        // Strings/interpolation are opaque lexical tokens, not entries here.
+        let mut unmatched_comments: HashSet<_> = tokens
+            .iter()
+            .filter(|token| token.kind == lex::Kind::BlockComment)
+            .map(|token| (token.range.start, token.range.end))
+            .collect();
         let mut cursor = tree.walk();
         let mut depth = 0;
         loop {
             let node = cursor.node();
+            if node.kind() == "block_comment" {
+                unmatched_comments.remove(&(
+                    node.start_byte() + source.body_start(),
+                    node.end_byte() + source.body_start(),
+                ));
+            }
             if matches!(node.kind(), "binary_expression" | "set_statement")
                 && let Some(operator) = node.child_by_field_name("operator")
             {
@@ -131,6 +146,12 @@ impl Document {
                     break;
                 }
                 if !cursor.goto_parent() {
+                    if let Some((start, _)) = unmatched_comments.into_iter().min() {
+                        return Err(Failure::new(
+                            start,
+                            "unsupported block comment boundary: lexer and CST disagree; source was not changed",
+                        ));
+                    }
                     return Ok(Self {
                         tokens,
                         shape,

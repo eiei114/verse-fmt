@@ -99,6 +99,23 @@ This is deliberately narrower than the complete language. CST comparison and
 the indentation signature are not proofs of language semantics.
 Compiler/build and runtime checks in UEFN remain separate required gates.
 
+## Block-comment boundary guard
+
+Every independent lexer `BlockComment` token must match an exact CST
+`block_comment` byte span, including the UTF-8 BOM offset. A recovery-free
+tree can otherwise reinterpret a block comment as operators and line comments.
+Unmatched spans fail with exit 2 before output or writes; the earliest unmatched
+span determines the diagnostic. The existing bounded CST walk collects matches,
+with a token-limit-bounded set of lexical spans. Grammar and scanner are unchanged.
+
+This is one-way lexical block-comment coverage, not complete semantic validation
+or validation of every protected token. Strings and interpolation remain opaque
+lexical tokens. Previously accepted ambiguous inputs can now be refused; this
+mitigates unsafe acceptance rather than repairing comment syntax or adding P2
+multiline-if support. `tests/comment-boundary.rs` covers refusal, all-input
+write prevention, nested/multiple comments, opaque literals, BOM/CRLF and stable
+earliest-error positions using independently authored examples.
+
 ## Reproducible checks
 
 `cargo test --locked` includes the relevant lexical and CST regressions.
