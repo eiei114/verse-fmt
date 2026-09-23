@@ -30,7 +30,8 @@ idempotence. See [parser design](docs/parser-design.md) and
 [coverage/limitations](docs/grammar-coverage.md), [CLI/config](docs/cli.md) and
 [Windows write safety](docs/write-safety.md). The [local Windows performance
 baseline](docs/performance-baseline-2026-09-23.md) is informational, not a
-release target. This is not a compiler.
+release target. See [local packaging and future mise usage](docs/packaging-and-mise.md).
+This is not a compiler.
 
 ## Development
 
