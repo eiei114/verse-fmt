@@ -65,6 +65,7 @@ module.exports = grammar({
       $.using_declaration,
       $.var_declaration,
       $.set_statement,
+      $.constant_declaration,
       $.function_definition,
       $.extension_function_definition,
       $.type_definition,
@@ -110,9 +111,12 @@ module.exports = grammar({
     using_declaration: $ => seq(
       'using',
       '{',
-      $.module_path,
+      choice($.module_path, $.local_module_path),
       '}',
     ),
+
+    // Local qualified imports are distinct from slash-prefixed package paths.
+    local_module_path: $ => seq($.identifier, repeat(seq('.', $.identifier))),
 
     module_path: $ => seq(
       '/',
@@ -137,6 +141,18 @@ module.exports = grammar({
     ),
 
     // ─────────────────────────────────────────────
+    // Typed constants, at file scope or in executable blocks. Class fields
+    // retain their existing field_declaration node and optional initializer.
+    // An initializer is mandatory here; do not turn stray name:type into code.
+    constant_declaration: $ => seq(
+      field('name', choice($.identifier, $.module_scoped_identifier)),
+      optional(field('specifiers', $.specifier_list)),
+      ':',
+      field('type', $._type),
+      '=',
+      field('value', $._expression),
+    ),
+
     // Set statements: set target op value
     // ─────────────────────────────────────────────
 
@@ -263,7 +279,11 @@ module.exports = grammar({
 
     _enum_body: $ => choice(
       seq(':', $._indent, repeat($.enum_variant), $._dedent),
-      seq('{', repeat($.enum_variant), '}'),
+      seq('{', optional(seq(
+        $.enum_variant,
+        repeat(seq(optional(','), $.enum_variant)),
+        optional(','),
+      )), '}'),
     ),
 
     _class_member: $ => choice(
@@ -518,6 +538,7 @@ module.exports = grammar({
     _block_item: $ => choice(
       $.attribute,
       $.var_declaration,
+      $.constant_declaration,
       $.set_statement,
       $.function_definition,
       $.type_definition,

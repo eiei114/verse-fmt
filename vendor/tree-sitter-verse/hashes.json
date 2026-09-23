@@ -1,0 +1,13 @@
+{
+  "grammar.js": "5393dd048d3527f1514eee53781a19a466fea77e0ed5db4062ed236e64d2e6c1",
+  "tree-sitter.json": "f57ee6d1a5ee6958875e13074e8cbb8d53d87bb71793291bebd9854dd87e9ad6",
+  "src/parser.c": "11f640aae5b3b9aece4591763f5e69c32e973643b61f73707ebfe9aa712a81af",
+  "src/scanner.c": "19cde62cd35695010453006f19601393a82747231ddfecd81a6a5eff70e59712",
+  "src/grammar.json": "6699af9cfb287877621a89999c896605d755adef5b59795073b167e41d437cff",
+  "src/node-types.json": "82edda57e7f0a9ad761ed9278a1fc29caef95e8af72a222f50ed7bba3f97240c",
+  "src/tree_sitter/alloc.h": "b29c1c9fb7cc82f58c84b376df1297d6e2737a1d655fd356db0859e3c29c2fea",
+  "src/tree_sitter/array.h": "5bdf6ed1a78e3409fd443e085ca967a64c188a5d082aaf7f819bccd53a471c94",
+  "src/tree_sitter/parser.h": "180b893c8734778fd32f372dfbc27bd6ad1cd2221f26150b31256ff6716320d2",
+  "LICENSE": "d6a46baba7c836a5b7e20fe7dd7e51b0cdcb6b9fd3b597a6e89699c4cbbd0dd6",
+  "LICENSE-tree-sitter": "5f9cf9fb6acb1972b35ae29119ce563bb60ec097656bc4b69b9bac2d04c7a147"
+}

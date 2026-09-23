@@ -177,13 +177,68 @@ mod tests {
     }
 
     #[test]
+    fn typed_constants_retain_method_and_file_ownership() {
+        let text = "sample := class:\n    First():void =\n        Label:string=\"hello\"\n        Count:int=2\n    Second():void =\n        Other:int=3\nOutside:int=4\n";
+        let (_, _) = parsed(text);
+        let mut parser = Parser::new();
+        // SAFETY: same statically linked grammar as production.
+        let language = Language::new(unsafe { LanguageFn::from_raw(tree_sitter_verse) });
+        parser.set_language(&language).unwrap();
+        let tree = parser.parse(text, None).unwrap();
+        let mut pending = vec![tree.root_node()];
+        let mut constants = Vec::new();
+        while let Some(node) = pending.pop() {
+            if node.kind() == "constant_declaration" {
+                let name = node
+                    .child_by_field_name("name")
+                    .unwrap()
+                    .utf8_text(text.as_bytes())
+                    .unwrap();
+                let parent = node.parent().unwrap();
+                let scope = if parent.kind() == "source_file" {
+                    "file"
+                } else {
+                    assert_eq!(parent.kind(), "indented_block");
+                    let function = parent.parent().unwrap();
+                    assert_eq!(function.kind(), "function_definition");
+                    assert_eq!(function.parent().unwrap().kind(), "class_definition");
+                    function
+                        .child_by_field_name("name")
+                        .unwrap()
+                        .utf8_text(text.as_bytes())
+                        .unwrap()
+                };
+                constants.push((name, scope));
+            }
+            let mut cursor = node.walk();
+            pending.extend(node.named_children(&mut cursor));
+        }
+        constants.sort_unstable();
+        assert_eq!(
+            constants,
+            [
+                ("Count", "First"),
+                ("Label", "First"),
+                ("Other", "Second"),
+                ("Outside", "file")
+            ]
+        );
+    }
+
+    #[test]
     fn guards_recovery_and_unsupported_constructs() {
         for text in [
             "<# missing",
             "<#> comment\n    body\nCount := 1\n",
             "A := <p>text</p>\n",
             "得点 := 1\n",
-            "A:int=1\n",
+            "A:int=\n",
+            "A:int\n",
+            "using { Demo..Helpers }\n",
+            "using { Demo. }\n",
+            "using { }\n",
+            "shade := enum{Light,,Dark}\n",
+            "shade := enum{,Light}\n",
             "Add(X:int,Y:int):int = X+Y\n",
             "A := map{\"x\" => 1}\n",
         ] {

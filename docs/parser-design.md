@@ -26,13 +26,13 @@ The important observations were:
   upstream error recovery and must not count as successful analysis.
 - A `<#>` indented comment can be misinterpreted as a short comment followed
   by code identifiers. Formatting it is unsafe without a correct comment parser.
-- A Unicode identifier, markup expression and top-level `Count:int=1` were
-  not accepted by this grammar. Rejection means unsupported by this tool,
-  not necessarily invalid Verse.
+- A Unicode identifier and markup expression were not accepted by the base
+  grammar. Rejection means unsupported by this tool, not necessarily invalid
+  Verse.
 - A concern about sibling methods escaping a class was disproved by
   inspecting node ancestry and ranges. The original grammar puts both
   methods inside the class. An experimental scanner change was discarded;
-  **vendored source is unmodified**.
+  **the pinned scanner remains unmodified**.
 
 The installed Epic Verse VSIX version `0.0.58011042`, associated with UEFN
 `++Fortnite+Release-42.20-CL-58011042-Windows`, was inspected for lexical
@@ -52,6 +52,15 @@ A custom full Verse parser was not implemented or benchmarked. Its appeal is
 control over whitespace, but its grammar maintenance cost is not justified
 for this first slice. A line/regex-only formatter cannot adequately protect
 interpolation, nested comments or block ownership and was rejected.
+
+The base grammar missed practical forms found in a user-provided project. The
+local grammar delta adds dotted local imports, initialized typed constants at
+file scope/executable blocks, and comma-separated braced enum variants. Its
+scanner is unchanged. Generated parser C targets ABI 15 and retains the
+tree-sitter 0.25.10 runtime header/license. `vendor/tree-sitter-verse/hashes.json`
+pins all grammar/generated/header/license bytes; maintainer regeneration uses
+`scripts/verify-grammar.ps1 -Regenerate`. Ordinary builds need no Node/npm.
+These extensions are syntax coverage, not official language validation.
 
 ## Independent safeguards
 
@@ -89,8 +98,8 @@ license are in `vendor/tree-sitter-verse/upstream.md`. Local probe logs under
 
 ## Expanded corpus
 
-`tests/fixtures/corpus.json` contains 65 self-authored named cases: 45 independent
-golden layouts and 20 refusals (malformed input and known unsupported forms,
+`tests/fixtures/corpus.json` contains 71 self-authored named cases: 52 independent
+golden layouts and 19 refusals (malformed input and known unsupported forms,
 clearly categorized). The corpus test invokes the real CLI and rechecks every
 successful output for idempotence. This is tool coverage, not UEFN acceptance.
 `src/robustness.rs` adds fixed-seed structured and arbitrary-byte checks plus

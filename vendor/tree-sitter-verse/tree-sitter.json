@@ -1,0 +1,9 @@
+{
+  "grammars": [{"name": "verse", "scope": "source.verse", "file-types": ["verse"]}],
+  "metadata": {
+    "name": "Verse",
+    "description": "Locally patched Verse grammar for conservative CLI tooling",
+    "version": "0.1.0",
+    "license": "MIT"
+  }
+}

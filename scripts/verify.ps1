@@ -3,6 +3,7 @@ $ErrorActionPreference = 'Stop'
 $saved = @{ Path = $env:Path; RUSTUP_TOOLCHAIN = $env:RUSTUP_TOOLCHAIN; RUSTC = $env:RUSTC; RUSTDOC = $env:RUSTDOC }
 Push-Location (Split-Path -Parent $PSScriptRoot)
 try {
+    & "$PSScriptRoot/verify-grammar.ps1"
     $match = Select-String -Path rust-toolchain.toml -Pattern '^channel\s*=\s*"([^"]+)"'
     if (-not $match) { throw 'No pinned Rust channel found' }
     $channel = $match.Matches[0].Groups[1].Value
