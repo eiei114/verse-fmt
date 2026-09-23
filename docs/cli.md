@@ -10,7 +10,9 @@ unsupported syntax, invariant, resource or I/O failure. Errors dominate changes.
 All inputs are analyzed before source/diff output or writes; formatter failures
 do not print partial formatted source. Errors and `--verbose` exclusion reasons
 go to stderr. `--color auto|always|never` affects diagnostics/diff, never source.
-Auto respects `NO_COLOR` and terminal detection.
+Auto respects `NO_COLOR` and terminal detection. On Windows, it enables virtual
+terminal processing for the selected console stream; if that mode cannot be
+enabled, Auto disables color for that stream.
 
 ## verse.toml (schema 1)
 

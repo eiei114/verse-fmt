@@ -11,6 +11,7 @@ import statistics
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 
 class MemoryCountersEx(ctypes.Structure):
@@ -56,21 +57,50 @@ def record_hashes(root):
 def run_sample(command, cwd):
     start = time.perf_counter()
     process = subprocess.Popen(command, cwd=cwd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+    stderr_prefix = bytearray()
+
+    def drain_stderr():
+        # Keep draining after the diagnostic prefix is full, or a noisy child
+        # can block on the pipe while the benchmark waits for it to exit.
+        while True:
+            chunk = process.stderr.read1(8192)
+            if not chunk:
+                break
+            remaining = 2048 - len(stderr_prefix)
+            if remaining > 0:
+                stderr_prefix.extend(chunk[:remaining])
+
+    stderr_reader = threading.Thread(target=drain_stderr, daemon=True)
+    stderr_reader.start()
     peak = 0
     while process.poll() is None:
         current = private_bytes(process.pid)
         if current is not None:
             peak = max(peak, current)
         time.sleep(0.002)
-    stderr = process.stderr.read()
+    process.wait()
+    stderr_reader.join()
+    process.stderr.close()
     elapsed = time.perf_counter() - start
     return {"seconds": elapsed, "exit_code": process.returncode,
             "peak_private_bytes_sampled": peak or None,
-            "stderr": stderr.decode("utf-8", errors="replace")[:500]}
+            "stderr": bytes(stderr_prefix).decode("utf-8", errors="replace")[:500]}
+
+def optional_run(command, **kwargs):
+    """Run an optional metadata probe; missing executables mean unavailable metadata."""
+    try:
+        return subprocess.run(command, **kwargs)
+    except FileNotFoundError:
+        return None
 
 def git_head(path):
-    result = subprocess.run(["git", "-C", str(path), "rev-parse", "HEAD"], capture_output=True, text=True)
-    return result.stdout.strip() if result.returncode == 0 else None
+    root = optional_run(["git", "-C", str(path), "rev-parse", "--show-toplevel"],
+                        capture_output=True, text=True)
+    if root is None or root.returncode != 0:
+        return None
+    result = optional_run(["git", "-C", root.stdout.strip(), "rev-parse", "--verify", "HEAD"],
+                          capture_output=True, text=True)
+    return result.stdout.strip() if result is not None and result.returncode == 0 else None
 
 def main():
     parser = argparse.ArgumentParser()
@@ -88,18 +118,21 @@ def main():
     versions = {}
     for name, binary in binaries.items():
         versions[name] = subprocess.run([str(binary), "--version"], capture_output=True, text=True, check=True).stdout.strip()
-    toolchain = subprocess.run(["rustup", "run", "1.97.0", "rustc", "-Vv"], capture_output=True, text=True)
-    pwsh = subprocess.run(["pwsh", "-NoProfile", "-Command", "$PSVersionTable.PSVersion.ToString()"], capture_output=True, text=True)
+    toolchain = optional_run(["rustup", "run", "1.97.0", "rustc", "-Vv"],
+                             capture_output=True, text=True)
+    pwsh = optional_run(["pwsh", "-NoProfile", "-Command", "$PSVersionTable.PSVersion.ToString()"],
+                        capture_output=True, text=True)
     report = {
         "schemaVersion": 1,
         "benchmark": "startup-inclusive local Windows CLI; self-authored protected-literal inputs",
         "machine": {"os": platform.platform(), "windows_version": platform.win32_ver(),
                     "architecture": platform.machine(), "processor": platform.processor(),
                     "processor_identifier": os.environ.get("PROCESSOR_IDENTIFIER"),
-                    "python": sys.version, "powershell": pwsh.stdout.strip() if pwsh.returncode == 0 else None,
-                    "rust_1_97_verbose": toolchain.stdout if toolchain.returncode == 0 else None},
-        "revisions": {"formatter": git_head(binaries["formatter"].parents[3]),
-                      "linter": git_head(binaries["linter"].parents[3])},
+                    "python": sys.version,
+                    "powershell": pwsh.stdout.strip() if pwsh is not None and pwsh.returncode == 0 else None,
+                    "rust_1_97_verbose": toolchain.stdout if toolchain is not None and toolchain.returncode == 0 else None},
+        "revisions": {"formatter": git_head(binaries["formatter"].parent),
+                      "linter": git_head(binaries["linter"].parent)},
         "binaries": {name: {"path": str(path), "version": versions[name],
                             "sha256": hashlib.sha256(path.read_bytes()).hexdigest()}
                      for name, path in binaries.items()},

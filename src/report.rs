@@ -7,14 +7,53 @@ pub fn color(mode: Color, stderr: bool) -> bool {
         Color::Always => true,
         Color::Never => false,
         Color::Auto => {
-            std::env::var_os("NO_COLOR").is_none()
-                && if stderr {
-                    std::io::stderr().is_terminal()
-                } else {
-                    std::io::stdout().is_terminal()
-                }
+            if std::env::var_os("NO_COLOR").is_some() {
+                return false;
+            }
+            let is_terminal = if stderr {
+                std::io::stderr().is_terminal()
+            } else {
+                std::io::stdout().is_terminal()
+            };
+            is_terminal && enable_virtual_terminal_processing(stderr)
         }
     }
+}
+
+#[cfg(windows)]
+fn enable_virtual_terminal_processing(stderr: bool) -> bool {
+    use windows_sys::Win32::{
+        Foundation::INVALID_HANDLE_VALUE,
+        System::Console::{
+            ENABLE_VIRTUAL_TERMINAL_PROCESSING, GetConsoleMode, GetStdHandle, STD_ERROR_HANDLE,
+            STD_OUTPUT_HANDLE, SetConsoleMode,
+        },
+    };
+
+    let standard_handle = if stderr {
+        STD_ERROR_HANDLE
+    } else {
+        STD_OUTPUT_HANDLE
+    };
+    // GetStdHandle may return NULL or INVALID_HANDLE_VALUE when the stream is unavailable.
+    let handle = unsafe { GetStdHandle(standard_handle) };
+    if handle.is_null() || handle == INVALID_HANDLE_VALUE {
+        return false;
+    }
+
+    let mut mode = 0;
+    if unsafe { GetConsoleMode(handle, &mut mode) } == 0 {
+        return false;
+    }
+    if mode & ENABLE_VIRTUAL_TERMINAL_PROCESSING != 0 {
+        return true;
+    }
+    unsafe { SetConsoleMode(handle, mode | ENABLE_VIRTUAL_TERMINAL_PROCESSING) != 0 }
+}
+
+#[cfg(not(windows))]
+fn enable_virtual_terminal_processing(_stderr: bool) -> bool {
+    true
 }
 
 pub fn diff(label: &str, before: &str, after: &str, colored: bool) -> String {
