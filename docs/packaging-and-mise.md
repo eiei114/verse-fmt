@@ -18,6 +18,9 @@ A sibling `.sha256` file is generated and verified against the exact archive.
 ZIP entry order and timestamps are normalized. Local packaging verifies CRC,
 the full entry list and every archived byte. The checksum identifies this
 artifact; it is not a signature or trust assertion.
+The extracted executable also runs `--version` and a read-only `--check` with
+the child process PATH reduced to Windows system directories. This is a local
+smoke test only; it is not a clean-machine or MSVC-runtime dependency test.
 
 The following is a future UEFN-project `mise.toml` example only. Version
 `0.1.0-alpha.1` has not been released, asset selection has not been tested with
