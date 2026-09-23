@@ -51,6 +51,13 @@ fn protects_strings_comments_and_interpolation() {
 }
 
 #[test]
+fn preserves_mixed_line_endings_in_formatted_output() {
+    let out = stdin(b"A:=1\r\nB:=2\n", &[]);
+    assert_eq!(out.status.code(), Some(0), "{out:?}");
+    assert_eq!(out.stdout, b"A := 1\r\nB := 2\n");
+}
+
+#[test]
 fn formats_a_minimal_device_without_moving_blocks() {
     let out = stdin(include_bytes!("fixtures/device.input.verse"), &[]);
     assert_eq!(out.status.code(), Some(0), "{:?}", out);
@@ -64,7 +71,6 @@ fn rejects_incomplete_or_unsupported_input_without_partial_output() {
         b"Label := \"unterminated",
         b"<#> unsupported indented comment\n    text\nCount:=1\n",
         b"Count := (1\n",
-        b"A:=1\r\nB:=2\n",
         b"\xff",
         b"A:=1\0\n",
         b"Text:=<p>Hello</p>\n",

@@ -20,8 +20,10 @@ cargo run -- --show-config                # effective verse.toml settings
 
 `-` reads UTF-8 stdin. `--stdin-filepath` supplies a virtual name only. Prefer
 file input on Windows PowerShell 5.1, whose pipelines/redirection may change
-encoding. Strings/comments, BOM and LF/CRLF are preserved; mixed line endings
-are rejected. Layout includes conservative four-space block indentation,
+encoding. Strings/comments, BOM and each existing LF/CRLF terminator are
+preserved, including mixed files. A new final terminator uses the last observed
+style, defaulting to LF. Explicit LF/CRLF conversion refuses to alter line breaks
+inside a protected comment/string. Layout includes conservative four-space block indentation,
 CST-confirmed operator/call spacing, separators, unprotected trailing whitespace,
 blank-line runs and the final newline. Ambiguous indentation is rejected.
 

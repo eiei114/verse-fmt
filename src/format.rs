@@ -72,12 +72,16 @@ fn layout(
         let previous = index.checked_sub(1).map(|i| &document.tokens[i]);
         let next = document.tokens.get(index + 1);
         if token.kind == Kind::Newline {
-            output.push_str(newline);
+            output.push_str(if options.line_ending == LineEnding::Preserve {
+                token.text(source)
+            } else {
+                newline
+            });
             continue;
         }
         if !token.kind.is_trivia()
-            && token.text(source).contains('\n')
-            && newline != source.newline()
+            && options.line_ending != LineEnding::Preserve
+            && contains_other_line_ending(token.text(source), newline)
         {
             return Err(Failure::new(
                 token.range.start,
@@ -112,6 +116,18 @@ fn layout(
         output.push_str(newline);
     }
     Ok(output)
+}
+
+fn contains_other_line_ending(text: &str, requested: &str) -> bool {
+    let bytes = text.as_bytes();
+    bytes.iter().enumerate().any(|(i, byte)| {
+        *byte == b'\n'
+            && if i > 0 && bytes[i - 1] == b'\r' {
+                requested != "\r\n"
+            } else {
+                requested != "\n"
+            }
+    })
 }
 
 fn gap(source: &Source, document: &Document, left: &Token, right: &Token) -> Option<&'static str> {
@@ -185,6 +201,39 @@ mod tests {
         assert_eq!(
             format(&source, &Options::default()).unwrap(),
             "calc := class:\n    Value:int = 1\n    Get(X:int, Y:int):int =\n        X + Y\n"
+        );
+    }
+
+    #[test]
+    fn preserves_each_mixed_line_ending_and_uses_last_style_for_added_final_newline() {
+        let source = Source::from_bytes(b"A:=1\r\nB:=2\nC:=3  ").unwrap();
+        assert_eq!(
+            format(&source, &Options::default()).unwrap(),
+            "A := 1\r\nB := 2\nC := 3\n"
+        );
+    }
+
+    #[test]
+    fn forced_line_ending_rejects_only_protected_spans_that_would_change() {
+        let source = Source::from_bytes(b"<# same style\r\n#>\r\nA:=1\n").unwrap();
+        assert!(
+            format(
+                &source,
+                &Options {
+                    line_ending: LineEnding::Crlf
+                }
+            )
+            .is_ok()
+        );
+        let mixed_protected = Source::from_bytes(b"<# mixed\r\nLF\n#>\nA:=1\n").unwrap();
+        assert!(
+            format(
+                &mixed_protected,
+                &Options {
+                    line_ending: LineEnding::Crlf
+                }
+            )
+            .is_err()
         );
     }
 

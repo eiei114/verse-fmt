@@ -6,7 +6,7 @@ Other platforms have no supported write adapter yet; read-only paths are not
 deliberately disabled. UEFN and clean-machine verification remain separate.
 
 1. Snapshot bytes, file identity, link count, timestamps and attributes. Reject
-   unsupported/reparse paths, mixed encodings/endings and unsafe syntax.
+   unsupported/reparse paths, mixed encodings, bare-CR endings and unsafe syntax.
 2. Analyze all candidates and validate lexical/CST/indentation equivalence and
    idempotence. Do not write unchanged files, preserving their modification time.
 3. Preflight every changed file before the first replacement. Refuse read-only

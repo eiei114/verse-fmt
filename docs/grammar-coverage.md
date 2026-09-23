@@ -25,7 +25,8 @@ The tool is an unreleased alpha and never replaces the UEFN compiler.
 | Top-level inline binary function body `Add(X:int,Y:int):int = X+Y` | Reject same-line sibling ambiguity; grammar otherwise mis-splits body | Expanded corpus; explicit guard in both tools |
 | String beginning with unescaped `#`, e.g. `A := "# text"` | Pinned scanner may misclassify; fails coverage checks, exit 2 | Linter rule investigation; never alter the literal to make it parse |
 | Malformed/unclosed input | Rejected, exit 2 | Recovery, delimiter, quote tests |
-| Mixed LF/CRLF, UTF-16, invalid UTF-8, NUL | Rejected, exit 2 | Source and CLI tests |
+| Mixed LF/CRLF | Preserved exactly in `preserve`; forced conversion follows protected-span policy | Source and CLI tests |
+| Bare CR, UTF-16, invalid UTF-8, NUL | Rejected, exit 2 | Source and CLI tests |
 
 Unknown syntax fails rather than returning an unchanged file as successful
 formatting. All accepted forms preserve their CST and non-trivia token bytes.

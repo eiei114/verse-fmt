@@ -65,7 +65,7 @@
     {"id":"typed-top-level", "category":"declaration", "input":"A:int=1\n", "expected":"A:int = 1\n"},
     {"id":"reject-multiline-string", "category":"coverage", "input":"A:=\"one\ntwo\"\n", "reject":true},
     {"id":"reject-escape", "category":"negative-protected", "input":"A:=\"bad\\z\"\n", "reject":true},
-    {"id":"reject-mixed-eol", "category":"encoding", "input":"A:=1\r\nB:=2\n", "reject":true},
+    {"id":"mixed-eol-preserved", "category":"encoding", "input":"A:=1\r\nB:=2\n", "expected":"A := 1\r\nB := 2\n"},
     {"id":"reject-bare-cr", "category":"encoding", "input":"A:=1\rB:=2", "reject":true},
     {"id":"reject-nul", "category":"encoding", "input":"A:=1\u0000\n", "reject":true},
     {"id":"reject-unclosed-paren", "category":"negative-block", "input":"A:=(1\n", "reject":true},

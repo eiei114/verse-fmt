@@ -45,24 +45,14 @@ impl Source {
         if let Some(i) = bytes.iter().position(|b| *b == 0) {
             return Err(Failure::new(i, "NUL is not supported in Verse source"));
         }
-        let (mut lf, mut crlf) = (false, false);
+        let mut crlf = false;
         let mut lines = vec![0];
         for (i, b) in bytes.iter().enumerate() {
             if *b == b'\r' && bytes.get(i + 1) != Some(&b'\n') {
                 return Err(Failure::new(i, "bare CR line endings are unsupported"));
             }
             if *b == b'\n' {
-                if i > 0 && bytes[i - 1] == b'\r' {
-                    crlf = true;
-                } else {
-                    lf = true;
-                }
-                if crlf && lf {
-                    return Err(Failure::new(
-                        i,
-                        "mixed LF/CRLF line endings are unsupported",
-                    ));
-                }
+                crlf = i > 0 && bytes[i - 1] == b'\r';
                 lines.push(i + 1);
             }
         }
@@ -121,8 +111,16 @@ mod tests {
     }
 
     #[test]
+    fn preserves_mixed_line_ending_positions_and_last_style() {
+        let source = Source::from_bytes(b"A\r\nB\nC\r\nD\n").unwrap();
+        assert_eq!(source.position(3), (2, 1));
+        assert_eq!(source.position(5), (3, 1));
+        assert_eq!(source.newline(), "\n");
+    }
+
+    #[test]
     fn rejects_unrepresentable_inputs() {
-        for bytes in [&b"\xff"[..], b"A\0", b"A\rB", b"A\r\nB\n", b"\xff\xfeA\0"] {
+        for bytes in [&b"\xff"[..], b"A\0", b"A\rB", b"\xff\xfeA\0"] {
             assert!(Source::from_bytes(bytes).is_err());
         }
         assert!(Source::from_bytes(&vec![b'a'; MAX_SOURCE_BYTES + 1]).is_err());
