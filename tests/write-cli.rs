@@ -79,6 +79,27 @@ fn oversized_config_and_gitignore_prevent_every_write() {
 }
 
 #[test]
+fn too_many_exclude_globs_prevent_every_write() {
+    let root = tempfile::tempdir().unwrap();
+    let source = root.path().join("a.verse");
+    fs::write(&source, b"A:=1  \n").unwrap();
+    let globs = (0..257)
+        .map(|index| format!("'pattern-{index}/**'"))
+        .collect::<Vec<_>>()
+        .join(", ");
+    fs::write(
+        root.path().join("verse.toml"),
+        format!("[files]\nexclude = [{globs}]\n"),
+    )
+    .unwrap();
+
+    let out = run(root.path(), &[".", "--write"]);
+    assert_eq!(out.status.code(), Some(2), "{out:?}");
+    assert!(String::from_utf8_lossy(&out.stderr).contains("at most 256 exclude globs"));
+    assert_eq!(fs::read(&source).unwrap(), b"A:=1  \n");
+}
+
+#[test]
 fn hard_links_are_never_replaced() {
     let root = tempfile::tempdir().unwrap();
     let path = root.path().join("a.verse");
