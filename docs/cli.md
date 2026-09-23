@@ -1,5 +1,8 @@
 # CLI and project configuration
 
+Shared toolchain contract version **1**. Compiler/UEFN acceptance is not
+established; see [grammar coverage](grammar-coverage.md).
+
 `verse-fmt file.verse` or `verse-fmt -` writes formatted source only to stdout.
 Multiple files/directories require exactly one of `--check`, `--diff`, `--write`.
 No arguments is an error, not an implicit recursive write. Stdin cannot be a
