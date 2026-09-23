@@ -100,6 +100,29 @@ fn too_many_exclude_globs_prevent_every_write() {
 }
 
 #[test]
+fn source_file_limit_prevents_every_write() {
+    let root = tempfile::tempdir().unwrap();
+    for index in 0..10_001 {
+        let path = root.path().join(format!("source-{index:05}.verse"));
+        fs::write(
+            &path,
+            if index == 0 {
+                &b"A:=1  \n"[..]
+            } else {
+                &b""[..]
+            },
+        )
+        .unwrap();
+    }
+
+    let first = root.path().join("source-00000.verse");
+    let out = run(root.path(), &[".", "--write"]);
+    assert_eq!(out.status.code(), Some(2), "{out:?}");
+    assert!(String::from_utf8_lossy(&out.stderr).contains("at most 10000 source files"));
+    assert_eq!(fs::read(first).unwrap(), b"A:=1  \n");
+}
+
+#[test]
 fn hard_links_are_never_replaced() {
     let root = tempfile::tempdir().unwrap();
     let path = root.path().join("a.verse");
