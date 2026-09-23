@@ -263,3 +263,50 @@ pub fn discover(inputs: &[PathBuf], root: &Path, patterns: &[String]) -> Result<
     }
     Ok(walker.result)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn walker(visited: usize) -> Walker<'static> {
+        Walker {
+            root: Path::new("."),
+            excludes: GlobSetBuilder::new().build().unwrap(),
+            seen: HashSet::new(),
+            visited,
+            result: Discovery::default(),
+        }
+    }
+
+    #[test]
+    fn visited_entry_limit_fails_before_accessing_another_path() {
+        let mut walker = walker(100_000);
+        let error = walker
+            .visit(
+                Path::new("path-is-not-read-after-limit"),
+                false,
+                &mut Vec::new(),
+                0,
+            )
+            .unwrap_err();
+
+        assert!(error.contains("directory traversal resource limit"));
+        assert_eq!(walker.visited, 100_001);
+    }
+
+    #[test]
+    fn directory_depth_limit_fails_before_accessing_another_path() {
+        let mut walker = walker(0);
+        let error = walker
+            .visit(
+                Path::new("path-is-not-read-after-limit"),
+                false,
+                &mut Vec::new(),
+                129,
+            )
+            .unwrap_err();
+
+        assert!(error.contains("directory traversal resource limit"));
+        assert_eq!(walker.visited, 1);
+    }
+}
