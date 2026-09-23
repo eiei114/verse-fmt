@@ -45,8 +45,10 @@ refusal. Categories include normal/boundary/rejection forms, rather than merely
 counting whitespace permutations. Calls/index brackets are compacted only at
 CST-confirmed openers; this does not distinguish failable calls from indexing
 semantically. Fixed-seed tests additionally vary indent width, BOM, EOL and
-protected Unicode, and feed bounded arbitrary bytes. Performance and UEFN
-acceptance remain separate gates.
+protected Unicode, and feed bounded arbitrary bytes. A startup-inclusive local
+Windows performance baseline is recorded in
+[`performance-baseline-2026-09-23.md`](performance-baseline-2026-09-23.md); it is
+informational, not a guarantee, and does not substitute for UEFN acceptance.
 
 Real-project read-only inspection exposed additional practical coverage gaps:
 dotted local imports (`using { Demo.Helpers }`), comma-separated braced enums,

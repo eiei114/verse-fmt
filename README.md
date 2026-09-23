@@ -4,7 +4,8 @@ Conservative formatter for Epic Games' Verse language and UEFN projects.
 
 > Unreleased alpha under active implementation. File/stdin/project formatting,
 > configuration, check, diff and guarded Windows writes work for a bounded
-> syntax subset. UEFN compiler acceptance, full corpus testing and distribution
+> syntax subset. The 71-case self-authored corpus and local performance baseline
+> pass, but UEFN compiler acceptance, broad-project readiness and distribution
 > checks are still pending. Unsupported syntax fails with exit code 2.
 
 ## Usage
@@ -27,7 +28,9 @@ blank-line runs and the final newline. Ambiguous indentation is rejected.
 Every result is reparsed and checked for token/structure preservation and
 idempotence. See [parser design](docs/parser-design.md) and
 [coverage/limitations](docs/grammar-coverage.md), [CLI/config](docs/cli.md) and
-[Windows write safety](docs/write-safety.md). This is not a compiler.
+[Windows write safety](docs/write-safety.md). The [local Windows performance
+baseline](docs/performance-baseline-2026-09-23.md) is informational, not a
+release target. This is not a compiler.
 
 ## Development
 
