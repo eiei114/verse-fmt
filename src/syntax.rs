@@ -160,6 +160,10 @@ impl Document {
 }
 
 #[cfg(test)]
+#[path = "range-binding-tests.rs"]
+mod range_binding_tests;
+
+#[cfg(test)]
 mod tests {
     use super::*;
 

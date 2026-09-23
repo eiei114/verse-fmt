@@ -936,6 +936,12 @@ module.exports = grammar({
     ),
 
     for_iterator: $ => choice(
+      // Bounded range generator; ordinary := bindings are not iterators.
+      seq(
+        field('variable', $.identifier),
+        ':=',
+        field('iterable', $.range_expression),
+      ),
       seq(
         field('key', $.identifier),
         '->',

@@ -10,7 +10,7 @@ They use the project's MIT OR Apache-2.0 license.
 UEFN compile and runtime acceptance have not yet been performed. Parser and
 formatter test success must not be presented as UEFN acceptance.
 
-`corpus.json` adds 76 named, categorized self-authored cases with independent
+`corpus.json` adds 87 named, categorized self-authored cases with independent
 golden outputs or explicit rejection expectations. Categories cover encodings,
 declarations, literals, expressions, collections, attributes/specifiers,
 statements/control, block ownership/layout and protected spans. Rejection rows

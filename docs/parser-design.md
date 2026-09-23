@@ -108,8 +108,8 @@ license are in `vendor/tree-sitter-verse/upstream.md`. Local probe logs under
 
 ## Expanded corpus
 
-`tests/fixtures/corpus.json` contains 76 self-authored named cases: 58 independent
-golden layouts and 18 refusals (malformed input and known unsupported forms,
+`tests/fixtures/corpus.json` contains 87 self-authored named cases: 64 independent
+golden layouts and 23 refusals (malformed input and known unsupported forms,
 clearly categorized). The corpus test invokes the real CLI and rechecks every
 successful output for idempotence. This is tool coverage, not UEFN acceptance.
 `src/robustness.rs` adds fixed-seed structured and arbitrary-byte checks plus

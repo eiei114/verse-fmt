@@ -50,6 +50,10 @@ fn practical_syntax_has_golden_output_and_is_idempotent() {
             "F():void=\n  for (Key -> Value : Values):\n    Print(Value)\n",
             "F():void =\n    for (Key -> Value : Values):\n        Print(Value)\n",
         ),
+        (
+            "F():void=\n  for (I:=1..3):\n    Print(I)\n",
+            "F():void =\n    for (I := 1..3):\n        Print(I)\n",
+        ),
     ] {
         for source in [source, expected] {
             let dir = tempfile::tempdir().unwrap();

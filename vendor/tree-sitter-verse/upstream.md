@@ -34,3 +34,8 @@ committed generated C.
 
 The pinned base parser is not a Verse compiler and its recovery behavior remains
 insufficient for formatting safety by itself; see `../../docs/parser-design.md`.
+
+P1 additionally accepts `identifier := range_expression` in for_iterator only.
+No scanner change or general header binding alternative accompanies this delta.
+ABI15 artifacts were regenerated with Tree-sitter CLI 0.25.10; hashes.json pins
+the changed grammar and generated outputs. See `../../docs/range-binding.md`.

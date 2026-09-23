@@ -4,7 +4,7 @@ Conservative formatter for Epic Games' Verse language and UEFN projects.
 
 > Unreleased alpha under active implementation. File/stdin/project formatting,
 > configuration, check, diff and guarded Windows writes work for a bounded
-> syntax subset. The 76-case self-authored corpus and local performance baseline
+> syntax subset. The 87-case self-authored corpus and local performance baseline
 > pass, but UEFN compiler acceptance, broad-project readiness and distribution
 > checks are still pending. Unsupported syntax fails with exit code 2.
 

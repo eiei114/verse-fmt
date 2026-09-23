@@ -47,8 +47,8 @@ Before a public supported release, extend this table with fixture IDs, compiler
 build results and real-project validation. A passing parser probe is only an
 initial signal; it is not sufficient release evidence.
 
-`tests/fixtures/corpus.json` maps 76 named inputs to independent golden output or
-refusal (58 successes, 18 refusals). Categories include normal/boundary/rejection forms, rather than merely
+`tests/fixtures/corpus.json` maps 87 named inputs to independent golden output or
+refusal (64 successes, 23 refusals). Categories include normal/boundary/rejection forms, rather than merely
 counting whitespace permutations. Calls/index brackets are compacted only at
 CST-confirmed openers; this does not distinguish failable calls from indexing
 semantically. Fixed-seed tests additionally vary indent width, BOM, EOL and
@@ -70,3 +70,9 @@ Parser recovery can also lose enclosing structure, so an "adjacent top-level"
 error does not prove the original construct really was top-level. No private
 project sources are included in this repository. Broad UEFN-project readiness
 has not been demonstrated.
+
+The bounded P1 extension accepts `for (I := 1..3)` range generators,
+including tested bounds, comma-separated generators/filters and nested bodies.
+It does not enable general intermediate `:=` bindings inside a header.
+See [range-binding scope and evidence](range-binding.md). All unsupported-form
+refusals remain tool coverage limits, not claims that Verse rejects those forms.
