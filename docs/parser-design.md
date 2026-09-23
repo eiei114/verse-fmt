@@ -31,8 +31,10 @@ The important observations were:
   Verse.
 - A concern about sibling methods escaping a class was disproved by
   inspecting node ancestry and ranges. The original grammar puts both
-  methods inside the class. An experimental scanner change was discarded;
-  **the pinned scanner remains unmodified**.
+  methods inside the class. An experimental scanner change to address this
+  concern was discarded. A later, separate hardening caps scanner indentation
+  state to fit Tree-sitter's serialization buffer; it does not change this
+  parse behavior.
 
 The installed Epic Verse VSIX version `0.0.58011042`, associated with UEFN
 `++Fortnite+Release-42.20-CL-58011042-Windows`, was inspected for lexical
@@ -58,11 +60,17 @@ local grammar delta adds dotted local imports, initialized typed constants at
 file scope/executable blocks, comma-separated braced enum variants, empty class
 base lists, if-binding conditions, failable indexed `set` conditions, tested
 key/value iterators, and indented object/array construction with anonymous field
-initializers. Its scanner is unchanged. Generated parser C targets ABI 15 and retains the
-tree-sitter 0.25.10 runtime header/license. `vendor/tree-sitter-verse/hashes.json`
-pins all grammar/generated/header/license bytes; maintainer regeneration uses
+initializers. The scanner has a local serialization-bound hardening patch;
+comment/string tokenization is unchanged. Generated parser C targets ABI 15 and
+retains the tree-sitter 0.25.10 runtime header/license.
+`vendor/tree-sitter-verse/hashes.json` pins grammar/generated/header/license
+bytes and the local scanner. Maintainer regeneration uses
 `scripts/verify-grammar.ps1 -Regenerate`. Ordinary builds need no Node/npm.
 These extensions are syntax coverage, not official language validation.
+
+The scanner's indentation stack is capped at 253 entries so its serialized
+state fits Tree-sitter 0.25.10's 1024-byte buffer. Deeper indentation fails
+closed. This is a parser-safety bound, not a Verse language limit.
 
 ## Independent safeguards
 

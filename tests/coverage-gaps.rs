@@ -74,3 +74,33 @@ fn practical_syntax_has_golden_output_and_is_idempotent() {
         }
     }
 }
+
+#[test]
+fn extreme_indentation_fails_closed_without_scanner_serialization_overflow() {
+    let mut source = String::from("F():void =\n");
+    for level in 1..=260 {
+        source.push_str(&"    ".repeat(level));
+        source.push_str("if (true):\n");
+    }
+    source.push_str(&"    ".repeat(261));
+    source.push_str("Print(\"deep\")\n");
+
+    let dir = tempfile::tempdir().unwrap();
+    let mut child = Command::new(env!("CARGO_BIN_EXE_verse-fmt"))
+        .current_dir(dir.path())
+        .arg("-")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(source.as_bytes())
+        .unwrap();
+    let out = child.wait_with_output().unwrap();
+    assert_eq!(out.status.code(), Some(2), "{out:?}");
+    assert!(!String::from_utf8_lossy(&out.stderr).contains("panicked"));
+}

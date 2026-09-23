@@ -15,7 +15,9 @@ typedef enum {
 /* ─────────────────────────────────────────────────────────────────
  * Scanner state
  * ───────────────────────────────────────────────────────────────── */
-#define MAX_INDENT 256
+/* The serialized state is one byte plus two uint32_t fields and the stack.
+ * Keep the worst-case output below Tree-sitter's 1024-byte buffer. */
+#define MAX_INDENT ((TREE_SITTER_SERIALIZATION_BUFFER_SIZE - 1 - 2 * sizeof(uint32_t)) / sizeof(uint32_t))
 
 typedef struct {
   uint32_t indent_stack[MAX_INDENT];

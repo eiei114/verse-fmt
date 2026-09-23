@@ -16,6 +16,7 @@ The tool is an unreleased alpha and never replaces the UEFN compiler.
 | Unicode in strings/comments | Protected, diagnostic scalar columns supported | Unicode position and stdin tests |
 | Braced and dot control bodies | Parsed in probe; no style conversion | Probe; expand golden coverage before transformations |
 | Tabs | Structural indentation tabs refused; protected text preserved | Indentation refusal tests; no guessed tab width |
+| Indentation deeper than 253 scanner levels | Refused | Scanner serialization must fit Tree-sitter's 1024-byte state buffer |
 | `<#>` indented comments | Unsupported, exit 2 | Guard regression; upstream misclassification |
 | Markup expressions | Unsupported, exit 2 | Guard/CLI regression |
 | Quoted or non-ASCII identifiers | Unsupported, exit 2 | Lexer/grammar coverage limit |
