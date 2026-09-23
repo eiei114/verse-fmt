@@ -57,6 +57,28 @@ fn aggregate_input_limit_prevents_every_write() {
 }
 
 #[test]
+fn oversized_config_and_gitignore_prevent_every_write() {
+    let root = tempfile::tempdir().unwrap();
+    let source = root.path().join("a.verse");
+    fs::write(&source, b"A:=1  \n").unwrap();
+    let oversized = vec![b'#'; 256 * 1024 + 1];
+
+    let config = root.path().join("verse.toml");
+    fs::write(&config, &oversized).unwrap();
+    let out = run(root.path(), &[".", "--write"]);
+    assert_eq!(out.status.code(), Some(2), "{out:?}");
+    assert!(String::from_utf8_lossy(&out.stderr).contains("configuration exceeds 256 KiB"));
+    assert_eq!(fs::read(&source).unwrap(), b"A:=1  \n");
+
+    fs::remove_file(config).unwrap();
+    fs::write(root.path().join(".gitignore"), &oversized).unwrap();
+    let out = run(root.path(), &[".", "--write"]);
+    assert_eq!(out.status.code(), Some(2), "{out:?}");
+    assert!(String::from_utf8_lossy(&out.stderr).contains(".gitignore exceeds 256 KiB"));
+    assert_eq!(fs::read(&source).unwrap(), b"A:=1  \n");
+}
+
+#[test]
 fn hard_links_are_never_replaced() {
     let root = tempfile::tempdir().unwrap();
     let path = root.path().join("a.verse");
