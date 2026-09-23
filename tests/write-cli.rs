@@ -38,6 +38,25 @@ fn malformed_file_prevents_all_writes() {
 }
 
 #[test]
+fn aggregate_input_limit_prevents_every_write() {
+    let root = tempfile::tempdir().unwrap();
+    let first = root.path().join("00-first.verse");
+    fs::write(&first, b"A:=1  \n").unwrap();
+    for index in 0..8 {
+        let path = root.path().join(format!("{:02}-large.verse", index + 1));
+        fs::File::create(path)
+            .unwrap()
+            .set_len(8 * 1024 * 1024)
+            .unwrap();
+    }
+
+    let out = run(root.path(), &[".", "--write"]);
+    assert_eq!(out.status.code(), Some(2), "{out:?}");
+    assert!(String::from_utf8_lossy(&out.stderr).contains("64 MiB total limit"));
+    assert_eq!(fs::read(first).unwrap(), b"A:=1  \n");
+}
+
+#[test]
 fn hard_links_are_never_replaced() {
     let root = tempfile::tempdir().unwrap();
     let path = root.path().join("a.verse");
