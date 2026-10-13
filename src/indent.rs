@@ -46,7 +46,7 @@ pub fn analyze(source: &Source, tokens: &[Token]) -> Result<Indentation, Failure
         let protected_start = line_tokens.first().is_some_and(|t| t.range.start < start);
         let significant: Vec<_> = line_tokens
             .iter()
-            .filter(|t| !t.kind.is_trivia() && !t.kind.is_comment())
+            .filter(|t| t.kind.is_significant())
             .collect();
         let code_line = !protected_start && !significant.is_empty();
         let blank = !protected_start && line_tokens.iter().all(|t| t.kind.is_trivia());
@@ -134,6 +134,14 @@ mod tests {
             analyze(&a, &lex::scan(&a).unwrap()).unwrap().signature,
             analyze(&b, &lex::scan(&b).unwrap()).unwrap().signature
         );
+    }
+
+    #[test]
+    fn comment_only_lines_do_not_change_the_indentation_signature() {
+        let source = Source::from_bytes(b"f():void =\n    # comment\n    A()\n").unwrap();
+        let indentation = analyze(&source, &lex::scan(&source).unwrap()).unwrap();
+
+        assert_eq!(indentation.signature, [(0, 0), (1, 0)]);
     }
 
     #[test]
