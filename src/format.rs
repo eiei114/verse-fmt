@@ -131,11 +131,7 @@ fn contains_other_line_ending(text: &str, requested: &str) -> bool {
 }
 
 fn gap(source: &Source, document: &Document, left: &Token, right: &Token) -> Option<&'static str> {
-    if left.kind.is_trivia()
-        || right.kind.is_trivia()
-        || left.kind.is_comment()
-        || right.kind.is_comment()
-    {
+    if !left.kind.is_significant() || !right.kind.is_significant() {
         return None;
     }
     let a = left.text(source);
@@ -206,6 +202,16 @@ mod tests {
         assert_eq!(
             format(&source, &Options::default()).unwrap(),
             "calc := class:\n    Value:int = 1\n    Get(X:int, Y:int):int =\n        X + Y\n"
+        );
+    }
+
+    #[test]
+    fn spacing_is_not_inserted_across_comment_tokens() {
+        let source = Source::from_bytes(b"Value := A+<# keep #>B\n").unwrap();
+
+        assert_eq!(
+            format(&source, &Options::default()).unwrap(),
+            "Value := A +<# keep #>B\n"
         );
     }
 

@@ -22,6 +22,9 @@ impl Kind {
     pub fn is_comment(self) -> bool {
         matches!(self, Self::LineComment | Self::BlockComment)
     }
+    pub fn is_significant(self) -> bool {
+        !self.is_trivia() && !self.is_comment()
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
