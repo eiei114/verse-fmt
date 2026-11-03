@@ -83,6 +83,42 @@ fn rejects_incomplete_or_unsupported_input_without_partial_output() {
     }
 }
 
+/// Pins the stdin/file byte limit shared by every input path. The oversized
+/// payload is redirected from a file so the parent never blocks on a pipe that
+/// the child intentionally stops reading.
+#[test]
+fn oversized_stdin_is_refused_instead_of_truncated() {
+    let directory = tempfile::tempdir().unwrap();
+    let oversized = directory.path().join("stdin.verse");
+    std::fs::write(&oversized, vec![b' '; 8 * 1024 * 1024 + 1]).unwrap();
+    let out = Command::new(env!("CARGO_BIN_EXE_verse-fmt"))
+        .arg("-")
+        .stdin(Stdio::from(std::fs::File::open(&oversized).unwrap()))
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(2), "{out:?}");
+    assert!(out.stdout.is_empty());
+    let error = String::from_utf8_lossy(&out.stderr);
+    assert!(error.contains("source exceeds the 8 MiB limit"), "{error}");
+}
+
+#[test]
+fn oversized_file_is_refused_before_any_analysis() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("large.verse");
+    std::fs::write(&path, vec![b' '; 8 * 1024 * 1024 + 1]).unwrap();
+    let out = Command::new(env!("CARGO_BIN_EXE_verse-fmt"))
+        .arg(&path)
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(2), "{out:?}");
+    assert!(out.stdout.is_empty());
+    let error = String::from_utf8_lossy(&out.stderr);
+    assert!(error.contains("source exceeds the 8 MiB limit"), "{error}");
+}
+
 #[test]
 fn empty_input_stays_empty_and_comment_eof_is_safe() {
     for (input, expected) in [(&b""[..], &b""[..]), (&b"# Keep  "[..], &b"# Keep  \n"[..])] {

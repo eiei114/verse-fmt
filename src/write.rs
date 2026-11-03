@@ -2,12 +2,12 @@
 //! blanket guarantee that the original pathname survives every failure.
 use std::{
     fs::{self, File, OpenOptions},
-    io::{self, Read, Write},
+    io::{self, Write},
     path::{Path, PathBuf},
     time::SystemTime,
 };
 
-use crate::{files, source::MAX_SOURCE_BYTES};
+use crate::{files, limits, source::MAX_SOURCE_BYTES};
 
 #[derive(Debug, PartialEq, Eq)]
 struct Stamp {
@@ -66,13 +66,8 @@ fn stamp(file: &File) -> io::Result<Stamp> {
 }
 
 fn read_bytes(file: &mut File) -> io::Result<Vec<u8>> {
-    let mut bytes = Vec::new();
-    file.take((MAX_SOURCE_BYTES + 1) as u64)
-        .read_to_end(&mut bytes)?;
-    if bytes.len() > MAX_SOURCE_BYTES {
-        return Err(io::Error::other("source exceeds the 8 MiB limit"));
-    }
-    Ok(bytes)
+    limits::read_bounded(file, MAX_SOURCE_BYTES)?
+        .ok_or_else(|| io::Error::other("source exceeds the 8 MiB limit"))
 }
 
 pub struct Snapshot {
