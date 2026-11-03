@@ -7,6 +7,8 @@ use std::{
 use globset::{GlobBuilder, GlobSet, GlobSetBuilder};
 use ignore::gitignore::{Gitignore, GitignoreBuilder};
 
+use crate::limits;
+
 pub const MAX_TOTAL_BYTES: usize = 64 * 1024 * 1024;
 
 pub fn excludes(patterns: &[String]) -> Result<GlobSet, String> {
@@ -98,7 +100,7 @@ fn add_ignore(directory: &Path, ignores: &mut Vec<Gitignore>) -> Result<bool, St
         return Ok(false);
     }
     let size = fs::metadata(&file).map_err(|e| e.to_string())?.len();
-    if size > 256 * 1024 {
+    if size > limits::CONFIG_BYTES as u64 {
         return Err(format!("{}: .gitignore exceeds 256 KiB", file.display()));
     }
     let mut builder = GitignoreBuilder::new(directory);

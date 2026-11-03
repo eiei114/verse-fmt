@@ -4,6 +4,7 @@ mod files;
 mod format;
 mod indent;
 mod lex;
+mod limits;
 mod report;
 #[cfg(test)]
 mod robustness;
@@ -151,15 +152,9 @@ fn run(cli: cli::Cli) -> Result<u8, String> {
 }
 
 fn read(reader: impl Read) -> Result<Vec<u8>, String> {
-    let mut bytes = Vec::new();
-    reader
-        .take((source::MAX_SOURCE_BYTES + 1) as u64)
-        .read_to_end(&mut bytes)
-        .map_err(|e| e.to_string())?;
-    if bytes.len() > source::MAX_SOURCE_BYTES {
-        return Err("source exceeds the 8 MiB limit".into());
-    }
-    Ok(bytes)
+    limits::read_bounded(reader, source::MAX_SOURCE_BYTES)
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| "source exceeds the 8 MiB limit".into())
 }
 
 fn render(

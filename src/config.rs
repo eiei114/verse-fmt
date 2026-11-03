@@ -1,12 +1,11 @@
 use std::{
     fs::File,
-    io::Read,
     path::{Path, PathBuf},
 };
 
 use serde::{Deserialize, Serialize};
 
-use crate::format;
+use crate::{format, limits};
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
 #[serde(default, deny_unknown_fields)]
@@ -80,15 +79,12 @@ pub fn resolve(explicit: Option<&Path>, virtual_path: Option<&Path>) -> Result<C
     let root = std::fs::canonicalize(source.as_deref().and_then(Path::parent).unwrap_or(&cwd))
         .map_err(|e| e.to_string())?;
     let settings = if let Some(path) = &source {
-        let mut bytes = Vec::new();
-        File::open(path)
-            .map_err(|e| format!("configuration {}: {e}", path.display()))?
-            .take(256 * 1024 + 1)
-            .read_to_end(&mut bytes)
-            .map_err(|e| e.to_string())?;
-        if bytes.len() > 256 * 1024 {
-            return Err("configuration exceeds 256 KiB".into());
-        }
+        let bytes = limits::read_bounded(
+            File::open(path).map_err(|e| format!("configuration {}: {e}", path.display()))?,
+            limits::CONFIG_BYTES,
+        )
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| "configuration exceeds 256 KiB".to_owned())?;
         let text = std::str::from_utf8(&bytes)
             .map_err(|_| "configuration must be UTF-8")?
             .trim_start_matches('\u{feff}');
