@@ -323,6 +323,19 @@ fn discovery_failures_still_emit_an_envelope_with_null_path() {
     );
 }
 
+/// A machine message must carry no absolute spelling at all. Asserting on the
+/// absence of a drive prefix and of backslashes is spelling-independent: a temp
+/// directory can be reported verbatim (`\\?\…`) or short-named (`RUNNER~1`),
+/// and neither form is allowed here.
+fn assert_relative(message: &str, context: &impl std::fmt::Display) {
+    assert!(!message.contains('\\'), "{context}");
+    assert!(
+        !message.contains(":\\") && !message.contains(":/"),
+        "absolute path leaked into the machine report: {context}"
+    );
+    assert!(!message.starts_with('/'), "{context}");
+}
+
 /// A write failure is an execution error for one path, never a `refused` file:
 /// a refusal means the source was analyzed and rejected. Files staged but never
 /// committed must also not claim `formatted`, because no byte reached them.
@@ -340,15 +353,13 @@ fn a_write_failure_is_an_execution_error_and_leaves_staged_files_unwritten() {
 
     let out = run(root, &[".", "--write"]);
     assert_eq!(out.status.code(), Some(2), "{out:?}");
-    assert!(
-        String::from_utf8_lossy(&out.stderr).contains("read-only file"),
-        "{out:?}"
-    );
-    // The text path is unchanged and still prints the full host path.
-    assert!(
-        String::from_utf8_lossy(&out.stderr).contains(&root.display().to_string()),
-        "text diagnostic must stay byte-identical: {out:?}"
-    );
+    let stderr = String::from_utf8_lossy(&out.stderr).into_owned();
+    assert!(stderr.contains("read-only file"), "{stderr}");
+    // The text path is untouched: it still prints a native, absolute spelling,
+    // so it keeps backslashes the machine copy is required to normalize. The
+    // exact spelling is not asserted — a temp directory can be reported
+    // verbatim (`\\?\…`) or short-named (`RUNNER~1`) depending on the host.
+    assert!(stderr.contains('\\'), "{stderr}");
     assert_eq!(fs::read(root.join("a.verse")).unwrap(), b"A:=1\n");
     assert_eq!(fs::read(root.join("z.verse")).unwrap(), b"Z:=2\n");
 
@@ -388,11 +399,7 @@ fn a_write_failure_is_an_execution_error_and_leaves_staged_files_unwritten() {
     assert_eq!(errors[0]["path"], "z.verse", "{report}");
     let message = errors[0]["message"].as_str().unwrap();
     assert!(message.contains("read-only file"), "{report}");
-    assert!(!message.contains('\\'), "{report}");
-    assert!(
-        !message.contains(&root.display().to_string()),
-        "absolute path leaked into executionErrors: {report}"
-    );
+    assert_relative(message, &report);
 }
 
 /// Diagnostics built from absolute paths keep their host spelling on stderr and
@@ -410,11 +417,7 @@ fn machine_messages_carry_no_absolute_paths_while_stderr_keeps_them() {
     assert_eq!(out.status.code(), Some(2), "{out:?}");
     let report = envelope(&out);
     let message = report["executionErrors"][0]["message"].as_str().unwrap();
-    assert!(
-        !message.contains(root.to_str().unwrap()),
-        "absolute path leaked into the envelope: {report}"
-    );
-    assert!(!message.contains('\\'), "{report}");
+    assert_relative(message, &report);
     assert!(
         message.contains("missing folder/gone.verse"),
         "the affected source is still identifiable: {report}"
@@ -422,10 +425,11 @@ fn machine_messages_carry_no_absolute_paths_while_stderr_keeps_them() {
 
     let text = run(root, &[absolute, "--check"]);
     assert_eq!(text.status.code(), Some(2), "{text:?}");
-    assert!(
-        String::from_utf8_lossy(&text.stderr).contains(absolute),
-        "the text diagnostic must stay byte-identical: {text:?}"
-    );
+    let stderr = String::from_utf8_lossy(&text.stderr).into_owned();
+    assert!(stderr.contains("gone.verse"), "{stderr}");
+    // Native spelling, untouched: the text path keeps the host separators the
+    // machine copy is required to normalize.
+    assert!(stderr.contains('\\'), "{stderr}");
 }
 
 /// A successful `--write` still reports `formatted` for exactly the files that
