@@ -53,13 +53,16 @@ not a claim that earlier Rust versions cannot work. Install the MSVC build tools
 when building from source. Consumers of future prebuilt binaries will not need Cargo.
 
 ```powershell
-./scripts/verify.ps1
+pwsh -NoProfile -File scripts/verify.ps1
 cargo run -- --help
 ```
 
 `verify.ps1` runs the pinned-toolchain checks plus `scripts/verify-json.ps1`,
 which validates real release-binary JSON output for exit 0/1/2 against
-`docs/diagnostics.schema.json`.
+`docs/diagnostics.schema.json`, including a write that fails before committing
+and an input path given absolutely. Both scripts declare `#Requires -Version 7`:
+they use `ProcessStartInfo.ArgumentList` and `Test-Json -SchemaFile`, so Windows
+PowerShell 5.1 refuses them immediately instead of failing after the Rust build.
 
 `cargo fmt` formats this project's Rust source; `verse-fmt` will format Verse.
 Tests and the release build do not replace manual UEFN acceptance. CI never

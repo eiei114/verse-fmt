@@ -1,6 +1,10 @@
+#Requires -Version 7
 # Validates real release-binary JSON output against docs/diagnostics.schema.json.
 # Covers exit 0/1/2, every status, a Unicode-and-space path, determinism, the
-# forbidden flag combinations and the unchanged text default.
+# forbidden flag combinations, the unchanged text default, and the two failure
+# modes this contract must not misreport: a write that never committed and a
+# diagnostic built from an absolute path. Windows PowerShell 5.1 cannot run
+# this: it lacks ProcessStartInfo.ArgumentList and Test-Json -SchemaFile.
 $ErrorActionPreference = 'Stop'
 $repo = Split-Path -Parent $PSScriptRoot
 $bin = Join-Path $repo 'target/x86_64-pc-windows-msvc/release/verse-fmt.exe'
@@ -124,6 +128,48 @@ try {
         if (-not $result.Stderr.Contains('cannot be combined')) {
             throw "json with $($combo[1]) did not explain the conflict"
         }
+    }
+
+    # ---- a write failure is an execution error, not a refused file -------
+    # Preflight refuses the whole batch, so nothing may claim `formatted` and no
+    # entry may be `refused`: a refusal means the source was rejected.
+    $writeProject = Join-Path $workspace 'write failure'
+    New-Item -ItemType Directory $writeProject | Out-Null
+    Set-Content -LiteralPath (Join-Path $writeProject 'a.verse') -Value 'A:=1' -NoNewline
+    Set-Content -LiteralPath (Join-Path $writeProject 'z.verse') -Value 'Z:=2' -NoNewline
+    $protected = Get-Item -LiteralPath (Join-Path $writeProject 'z.verse')
+    $protected.IsReadOnly = $true
+    try {
+        $blocked = Invoke-VerseFmt @('.', '--write', '--output-format', 'json') $writeProject
+        Assert-Equal $blocked.ExitCode 2 'write failure'
+        $report = Assert-Envelope $blocked 'write failure'
+        Assert-Equal $report.summary.filesChecked 2 'write failure filesChecked'
+        Assert-Equal $report.summary.filesRefused 0 'write failure filesRefused'
+        Assert-Equal $report.summary.complete 'False' 'write failure complete'
+        foreach ($entry in $report.files) {
+            Assert-Equal $entry.status 'would-format' "write failure status of $($entry.path)"
+        }
+        Assert-Equal $report.executionErrors.Count 1 'write failure executionErrors count'
+        Assert-Equal $report.executionErrors[0].path 'z.verse' 'write failure executionErrors path'
+        if (-not $report.executionErrors[0].message.Contains('read-only file')) {
+            throw 'write failure did not explain the refusal'
+        }
+        $unchanged = (Get-Content -LiteralPath (Join-Path $writeProject 'a.verse') -Raw) -replace "`r?`n$", ''
+        Assert-Equal $unchanged 'A:=1' 'a write failure must not replace another file'
+    } finally {
+        $protected.IsReadOnly = $false
+    }
+
+    # ---- an absolute input path does not reach the machine report -------
+    $absolute = Join-Path $workspace 'absent folder/missing.verse'
+    $absoluteResult = Invoke-VerseFmt @($absolute, '--check', '--output-format', 'json') $project
+    Assert-Equal $absoluteResult.ExitCode 2 'absolute missing path'
+    $report = Assert-Envelope $absoluteResult 'absolute missing path'
+    if (-not ($report.executionErrors | Where-Object { $_.message.Contains('absent folder/missing.verse') })) {
+        throw 'the affected source is no longer identifiable in the machine report'
+    }
+    if ($report.executionErrors | Where-Object { $null -ne $_.path }) {
+        throw 'a discovery failure must not be attributed to a file entry'
     }
 
     # ---- the default stays byte-identical text ---------------------------

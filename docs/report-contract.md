@@ -77,10 +77,19 @@ discovery sorts by relative path, so recursive runs are ordered by `path`.
 |---|---|---|
 | `unchanged` | The formatter produced output equal to the source bytes. | 0 |
 | `would-format` | `--check` (or plain formatting to stdout with `--output-format json`) found a difference, and nothing was written. | 1 when combined with `--check`/`--diff` |
-| `formatted` | `--write` replaced the file with the formatted bytes, and the replacement committed. | 0 |
+| `formatted` | `--write` replaced the file with the formatted bytes, and that file's own commit returned success. | 0 |
 | `refused` | Analysis of this source failed. `reason.stage` says where. | Always 2 |
 
 `unchanged` entries carry no `reason`. Every other status carries one.
+
+A change is `would-format` until its bytes are on disk. `--write` promotes an
+entry to `formatted` only after that entry's replacement committed, so a batch
+that stops partway — a staging failure before any commit, or a commit failure
+mid-batch — leaves every file that was never replaced as `would-format`. The
+report therefore never claims a file was written when it was not. Files that
+*had* already committed before the failure keep `formatted`: the status
+describes each file's own outcome, and the batch does not roll back completed
+work.
 
 A source that fails discovery or cannot be read is not silently dropped: it is
 reported as `refused` when the failure is attributable to one path, and appears
@@ -123,6 +132,23 @@ distinguish; it does not split `parser` into narrower stages.
 `path` and `message` mirror what the text path prints on stderr, one entry per
 diagnostic. `path` is the affected source, or `null` when the failure is not
 attributable to one source (a discovery failure, an unusable configuration).
+
+A write failure — staging, preflight or replacement — is *only* an
+executionErrors entry. It is never a `refused` file: a refusal means the source
+was analyzed and rejected, and no `files` entry status changes because a write
+failed. The affected file keeps whatever status its analysis produced, so
+`would-format` plus a non-empty `executionErrors` is exactly "this file needed
+changes and the write did not happen".
+
+`message` never contains an absolute path. The text diagnostic keeps its host
+spelling — it still prints the full path stderr always has — but the machine
+copy rewrites each absolute spelling this invocation could have printed (the
+configuration root and its ancestors, in native, `/`-separated and
+`Debug`-escaped form) into a `/`-separated label relative to the configuration
+root, the same way `path` is normalized. A path the root cannot relativize, such
+as a target on another Windows volume, appears as `<abs>/…` rather than
+leaking the absolute prefix. Only the path is rewritten; the wording around it
+is unchanged, so a machine message is the stderr message with paths relativized.
 
 Execution errors continue to go to stderr as well. Machine output never replaces
 them: stdout carries the envelope, stderr carries the human diagnostic. Only the

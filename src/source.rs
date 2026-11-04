@@ -23,7 +23,8 @@ pub enum Stage {
     /// Post-format preservation and idempotence checks.
     Validation,
     /// Write preflight and commit. Reserved: a write failure is reported as an
-    /// execution error, never as a refused file.
+    /// execution error, never as a refused file (`src/main.rs::write_failure`).
+    /// No `files` entry carries this stage today.
     #[allow(dead_code)]
     Write,
     /// Emitting human or machine output. Reserved by the shared report contract.

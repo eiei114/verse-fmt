@@ -322,3 +322,131 @@ fn discovery_failures_still_emit_an_envelope_with_null_path() {
             .contains("missing.verse")
     );
 }
+
+/// A write failure is an execution error for one path, never a `refused` file:
+/// a refusal means the source was analyzed and rejected. Files staged but never
+/// committed must also not claim `formatted`, because no byte reached them.
+#[cfg(windows)]
+#[test]
+fn a_write_failure_is_an_execution_error_and_leaves_staged_files_unwritten() {
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path();
+    put(root, "a.verse", "A:=1\n");
+    put(root, "z.verse", "Z:=2\n");
+    let original = fs::metadata(root.join("z.verse")).unwrap().permissions();
+    let mut readonly = original.clone();
+    readonly.set_readonly(true);
+    fs::set_permissions(root.join("z.verse"), readonly).unwrap();
+
+    let out = run(root, &[".", "--write"]);
+    assert_eq!(out.status.code(), Some(2), "{out:?}");
+    assert!(
+        String::from_utf8_lossy(&out.stderr).contains("read-only file"),
+        "{out:?}"
+    );
+    // The text path is unchanged and still prints the full host path.
+    assert!(
+        String::from_utf8_lossy(&out.stderr).contains(&root.display().to_string()),
+        "text diagnostic must stay byte-identical: {out:?}"
+    );
+    assert_eq!(fs::read(root.join("a.verse")).unwrap(), b"A:=1\n");
+    assert_eq!(fs::read(root.join("z.verse")).unwrap(), b"Z:=2\n");
+
+    let out = run(root, &[".", "--write", "--output-format", "json"]);
+    assert_eq!(out.status.code(), Some(2), "{out:?}");
+    let report = envelope(&out);
+
+    let status = |path: &str| {
+        report["files"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|file| file["path"] == path)
+            .unwrap()["status"]
+            .as_str()
+            .unwrap()
+            .to_owned()
+    };
+    // Preflight refused the whole batch, so nothing was replaced anywhere.
+    assert_eq!(status("a.verse"), "would-format", "{report}");
+    assert_eq!(status("z.verse"), "would-format", "{report}");
+    assert_eq!(report["summary"]["filesChanged"], 2, "{report}");
+    assert_eq!(report["summary"]["filesRefused"], 0, "{report}");
+    assert_eq!(report["summary"]["complete"], false, "{report}");
+    assert_eq!(
+        report["files"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|file| file["status"] == "refused")
+            .count(),
+        0,
+        "a write failure must never fabricate a refusal: {report}"
+    );
+    let errors = report["executionErrors"].as_array().unwrap();
+    assert_eq!(errors.len(), 1, "{report}");
+    assert_eq!(errors[0]["path"], "z.verse", "{report}");
+    let message = errors[0]["message"].as_str().unwrap();
+    assert!(message.contains("read-only file"), "{report}");
+    assert!(!message.contains('\\'), "{report}");
+    assert!(
+        !message.contains(&root.display().to_string()),
+        "absolute path leaked into executionErrors: {report}"
+    );
+}
+
+/// Diagnostics built from absolute paths keep their host spelling on stderr and
+/// reach the envelope as root-relative labels: the contract forbids absolute
+/// paths in machine output.
+#[test]
+fn machine_messages_carry_no_absolute_paths_while_stderr_keeps_them() {
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path();
+    put(root, "a.verse", "A := 1\n");
+    let absolute = root.join("missing folder").join("gone.verse");
+    let absolute = absolute.to_str().unwrap();
+
+    let out = run(root, &[absolute, "--check", "--output-format", "json"]);
+    assert_eq!(out.status.code(), Some(2), "{out:?}");
+    let report = envelope(&out);
+    let message = report["executionErrors"][0]["message"].as_str().unwrap();
+    assert!(
+        !message.contains(root.to_str().unwrap()),
+        "absolute path leaked into the envelope: {report}"
+    );
+    assert!(!message.contains('\\'), "{report}");
+    assert!(
+        message.contains("missing folder/gone.verse"),
+        "the affected source is still identifiable: {report}"
+    );
+
+    let text = run(root, &[absolute, "--check"]);
+    assert_eq!(text.status.code(), Some(2), "{text:?}");
+    assert!(
+        String::from_utf8_lossy(&text.stderr).contains(absolute),
+        "the text diagnostic must stay byte-identical: {text:?}"
+    );
+}
+
+/// A successful `--write` still reports `formatted` for exactly the files that
+/// were replaced, and `--write` without a failure is unchanged.
+#[test]
+fn a_successful_write_promotes_only_replaced_files_to_formatted() {
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path();
+    put(root, "a.verse", "A:=1\n");
+    put(root, "b.verse", "B := 2\n");
+    let out = run(root, &[".", "--write", "--output-format", "json"]);
+    assert_eq!(out.status.code(), Some(0), "{out:?}");
+    let report = envelope(&out);
+    assert_eq!(report["files"][0]["path"], "a.verse");
+    assert_eq!(report["files"][0]["status"], "formatted");
+    assert_eq!(report["files"][0]["reason"]["stage"], "layout");
+    assert_eq!(report["files"][1]["status"], "unchanged");
+    assert_eq!(report["summary"]["filesChanged"], 1);
+    assert_eq!(report["summary"]["filesRefused"], 0);
+    assert_eq!(report["summary"]["complete"], true);
+    assert_eq!(report["executionErrors"].as_array().unwrap().len(), 0);
+    assert_eq!(fs::read(root.join("a.verse")).unwrap(), b"A := 1\n");
+    assert_eq!(fs::read(root.join("b.verse")).unwrap(), b"B := 2\n");
+}

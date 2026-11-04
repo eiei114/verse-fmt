@@ -34,11 +34,15 @@ Machine output contains no ANSI escapes, progress text or human banners, no
 timestamps and no absolute paths; two runs on the same input produce identical
 bytes. Paths are `/`-separated and relative to the config root. Execution errors
 still go to stderr **and** appear in the envelope, so a consumer can read
-stderr for humans and stdout for machines from one invocation. Exit codes do
-not change, and `json` never becomes a success signal by itself. `--write`
-with `json` is allowed and reports the post-write state. `json` with `--diff`
-(the diff is human text) or `--show-config` (which prints TOML) exits 2 with a
-message and writes nothing to stdout.
+stderr for humans and stdout for machines from one invocation. The machine copy
+of a diagnostic has absolute paths relativized to the config root; the stderr
+copy keeps the host spelling it has always printed. A write failure is an
+`executionErrors` entry only — the file keeps the analysis status it had, so
+`would-format` plus a failed write never reads as `formatted` or `refused`. Exit
+codes do not change, and `json` never becomes a success signal by itself.
+`--write` with `json` is allowed and reports the post-write state. `json` with
+`--diff` (the diff is human text) or `--show-config` (which prints TOML) exits 2
+with a message and writes nothing to stdout.
 
 ## verse.toml (schema 1)
 
