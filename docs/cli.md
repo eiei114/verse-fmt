@@ -17,6 +17,29 @@ Auto respects `NO_COLOR` and terminal detection. On Windows, it enables virtual
 terminal processing for the selected console stream; if that mode cannot be
 enabled, Auto disables color for that stream.
 
+## Machine-readable output
+
+`--output-format text|json` selects the stdout format. `text` is the default and
+is byte-identical to omitting the flag, for stdout, stderr and exit code.
+`json` writes exactly one versioned object on stdout and no other text; the
+envelope, field meanings, path normalization, ordering and stability promise are
+in [the report contract](report-contract.md) and
+[`diagnostics.schema.json`](diagnostics.schema.json).
+
+```powershell
+verse-fmt . --check --output-format json
+```
+
+Machine output contains no ANSI escapes, progress text or human banners, no
+timestamps and no absolute paths; two runs on the same input produce identical
+bytes. Paths are `/`-separated and relative to the config root. Execution errors
+still go to stderr **and** appear in the envelope, so a consumer can read
+stderr for humans and stdout for machines from one invocation. Exit codes do
+not change, and `json` never becomes a success signal by itself. `--write`
+with `json` is allowed and reports the post-write state. `json` with `--diff`
+(the diff is human text) or `--show-config` (which prints TOML) exits 2 with a
+message and writes nothing to stdout.
+
 ## verse.toml (schema 1)
 
 ```toml

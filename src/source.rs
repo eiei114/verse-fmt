@@ -3,15 +3,82 @@ use std::fmt;
 pub const MAX_SOURCE_BYTES: usize = 8 * 1024 * 1024;
 pub const MAX_NESTING: usize = 256;
 
+/// Failure stage vocabulary. Each variant names a pipeline phase this binary
+/// can actually distinguish; the names are the wire values of
+/// `reason.stage` in the JSON report (`docs/report-contract.md`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Stage {
+    /// Input discovery, path guards and configuration resolution. Reserved by
+    /// the shared report contract; no refusal emitted today carries it.
+    #[allow(dead_code)]
+    Discovery,
+    /// Reading and decoding a source (size, UTF-8, NUL, bare CR).
+    Source,
+    Lexer,
+    Parser,
+    /// Indentation and block-structure analysis.
+    Structure,
+    /// Layout emission.
+    Layout,
+    /// Post-format preservation and idempotence checks.
+    Validation,
+    /// Write preflight and commit. Reserved: a write failure is reported as an
+    /// execution error, never as a refused file.
+    #[allow(dead_code)]
+    Write,
+    /// Emitting human or machine output. Reserved by the shared report contract.
+    #[allow(dead_code)]
+    Reporting,
+}
+
+impl Stage {
+    /// Wire names in schema order, used to keep `docs/diagnostics.schema.json`
+    /// and this vocabulary in lockstep.
+    #[cfg(test)]
+    pub const ALL: [Self; 9] = [
+        Self::Discovery,
+        Self::Source,
+        Self::Lexer,
+        Self::Parser,
+        Self::Structure,
+        Self::Layout,
+        Self::Validation,
+        Self::Write,
+        Self::Reporting,
+    ];
+
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Discovery => "discovery",
+            Self::Source => "source",
+            Self::Lexer => "lexer",
+            Self::Parser => "parser",
+            Self::Structure => "structure",
+            Self::Layout => "layout",
+            Self::Validation => "validation",
+            Self::Write => "write",
+            Self::Reporting => "reporting",
+        }
+    }
+}
+
+impl serde::Serialize for Stage {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(self.name())
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Failure {
+    pub stage: Stage,
     pub offset: usize,
     pub message: String,
 }
 
 impl Failure {
-    pub fn new(offset: usize, message: impl Into<String>) -> Self {
+    pub fn new(stage: Stage, offset: usize, message: impl Into<String>) -> Self {
         Self {
+            stage,
             offset,
             message: message.into(),
         }
@@ -34,22 +101,35 @@ pub struct Source {
 impl Source {
     pub fn from_bytes(bytes: &[u8]) -> Result<Self, Failure> {
         if bytes.len() > MAX_SOURCE_BYTES {
-            return Err(Failure::new(0, "source exceeds the 8 MiB limit"));
+            return Err(Failure::new(
+                Stage::Source,
+                0,
+                "source exceeds the 8 MiB limit",
+            ));
         }
         let text = std::str::from_utf8(bytes).map_err(|e| {
             Failure::new(
+                Stage::Source,
                 e.valid_up_to(),
                 "source must be valid UTF-8 (UTF-16 is unsupported)",
             )
         })?;
         if let Some(i) = bytes.iter().position(|b| *b == 0) {
-            return Err(Failure::new(i, "NUL is not supported in Verse source"));
+            return Err(Failure::new(
+                Stage::Source,
+                i,
+                "NUL is not supported in Verse source",
+            ));
         }
         let mut crlf = false;
         let mut lines = vec![0];
         for (i, b) in bytes.iter().enumerate() {
             if *b == b'\r' && bytes.get(i + 1) != Some(&b'\n') {
-                return Err(Failure::new(i, "bare CR line endings are unsupported"));
+                return Err(Failure::new(
+                    Stage::Source,
+                    i,
+                    "bare CR line endings are unsupported",
+                ));
             }
             if *b == b'\n' {
                 crlf = i > 0 && bytes[i - 1] == b'\r';
@@ -124,5 +204,19 @@ mod tests {
             assert!(Source::from_bytes(bytes).is_err());
         }
         assert!(Source::from_bytes(&vec![b'a'; MAX_SOURCE_BYTES + 1]).is_err());
+    }
+
+    #[test]
+    fn stage_vocabulary_matches_the_committed_schema() {
+        let schema: serde_json::Value =
+            serde_json::from_str(include_str!("../docs/diagnostics.schema.json")).unwrap();
+        let documented: Vec<&str> = schema["$defs"]["reason"]["properties"]["stage"]["enum"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|stage| stage.as_str().unwrap())
+            .collect();
+        let implemented: Vec<&str> = Stage::ALL.iter().map(|stage| stage.name()).collect();
+        assert_eq!(documented, implemented);
     }
 }

@@ -33,6 +33,8 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'cargo test failed' }
     cargo build --release --locked --target x86_64-pc-windows-msvc
     if ($LASTEXITCODE -ne 0) { throw 'Windows release build failed' }
+    & "$PSScriptRoot/verify-json.ps1"
+    if ($LASTEXITCODE -ne 0) { throw 'JSON report contract failed' }
     Write-Output 'Verification passed (UEFN acceptance is a separate gate).'
 } finally {
     foreach ($key in $saved.Keys) { [Environment]::SetEnvironmentVariable($key, $saved[$key], 'Process') }

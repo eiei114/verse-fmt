@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 use crate::{
     indent,
     lex::{Kind, Token},
-    source::{Failure, Source},
+    source::{Failure, Source, Stage},
     syntax::Document,
 };
 
@@ -26,19 +26,24 @@ pub fn format(source: &Source, options: &Options) -> Result<String, Failure> {
     let before = Document::parse(source)?;
     let indentation = indent::analyze(source, &before.tokens)?;
     let output = layout(source, &before, &indentation, options)?;
-    let output_source = Source::from_bytes(output.as_bytes())?;
+    // The formatter produced these bytes itself, so a decode failure is a
+    // validation failure of our own output, never a `source` input failure.
+    let output_source = Source::from_bytes(output.as_bytes())
+        .map_err(|e| Failure::new(Stage::Validation, e.offset, e.message))?;
     let after = Document::parse(&output_source)?;
     let after_indentation = indent::analyze(&output_source, &after.tokens)?;
     if !before.equivalent(source, &after, &output_source)
         || indentation.signature != after_indentation.signature
     {
         return Err(Failure::new(
+            Stage::Validation,
             0,
             "formatting failed token/structure/indentation preservation checks; source was not changed",
         ));
     }
     if layout(&output_source, &after, &after_indentation, options)? != output {
         return Err(Failure::new(
+            Stage::Validation,
             0,
             "formatting failed idempotence check; source was not changed",
         ));
@@ -84,6 +89,7 @@ fn layout(
             && contains_other_line_ending(token.text(source), newline)
         {
             return Err(Failure::new(
+                Stage::Layout,
                 token.range.start,
                 "requested line ending would change a protected comment/string",
             ));

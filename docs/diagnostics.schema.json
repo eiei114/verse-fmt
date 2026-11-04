@@ -1,0 +1,138 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://github.com/eiei114/verse-fmt/docs/diagnostics.schema.json",
+  "title": "verse-fmt JSON report",
+  "description": "The single object verse-fmt writes to stdout for --output-format json. See docs/report-contract.md for field semantics, ordering and the stability promise.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "tool", "summary", "files", "executionErrors"],
+  "properties": {
+    "schemaVersion": {
+      "description": "Envelope schema version. A breaking change increments it.",
+      "const": 1
+    },
+    "tool": { "$ref": "#/$defs/tool" },
+    "summary": { "$ref": "#/$defs/summary" },
+    "files": {
+      "description": "One entry per analyzed source, ordered by path.",
+      "type": "array",
+      "items": { "$ref": "#/$defs/file" }
+    },
+    "executionErrors": {
+      "description": "Diagnostics mirrored from stderr. Not a substitute for `files`.",
+      "type": "array",
+      "items": { "$ref": "#/$defs/executionError" }
+    }
+  },
+  "$defs": {
+    "tool": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "version"],
+      "properties": {
+        "name": { "type": "string", "const": "verse-fmt" },
+        "version": { "type": "string", "minLength": 1 }
+      }
+    },
+    "summary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "filesChecked",
+        "filesChanged",
+        "filesUnchanged",
+        "filesRefused",
+        "complete"
+      ],
+      "properties": {
+        "filesChecked": {
+          "description": "Number of entries in `files`.",
+          "type": "integer",
+          "minimum": 0
+        },
+        "filesChanged": {
+          "description": "`formatted` plus `would-format` entries.",
+          "type": "integer",
+          "minimum": 0
+        },
+        "filesUnchanged": {
+          "description": "`unchanged` entries.",
+          "type": "integer",
+          "minimum": 0
+        },
+        "filesRefused": {
+          "description": "`refused` entries.",
+          "type": "integer",
+          "minimum": 0
+        },
+        "complete": {
+          "description": "False exactly when `executionErrors` is non-empty, i.e. the invocation failed as a whole (exit 2).",
+          "type": "boolean"
+        }
+      }
+    },
+    "file": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "status"],
+      "properties": {
+        "path": {
+          "description": "Path with `/` separators, relative to the config root, or the stdin label.",
+          "type": "string",
+          "minLength": 1
+        },
+        "status": {
+          "type": "string",
+          "enum": ["unchanged", "formatted", "would-format", "refused"]
+        },
+        "reason": { "$ref": "#/$defs/reason" }
+      },
+      "if": {
+        "properties": { "status": { "enum": ["unchanged"] } },
+        "required": ["status"]
+      },
+      "then": { "not": { "required": ["reason"] } },
+      "else": { "required": ["reason"] }
+    },
+    "reason": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["stage", "message"],
+      "properties": {
+        "stage": {
+          "description": "Pipeline stage that produced the status. `layout` for a content change, otherwise the failing stage.",
+          "type": "string",
+          "enum": [
+            "discovery",
+            "source",
+            "lexer",
+            "parser",
+            "structure",
+            "layout",
+            "validation",
+            "write",
+            "reporting"
+          ]
+        },
+        "message": { "type": "string", "minLength": 1 },
+        "offset": {
+          "description": "Byte offset in the analyzed source, when the failure has a known position.",
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "executionError": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "message"],
+      "properties": {
+        "path": {
+          "description": "The affected path, or null when the failure is not attributable to one source.",
+          "type": ["string", "null"]
+        },
+        "message": { "type": "string", "minLength": 1 }
+      }
+    }
+  }
+}

@@ -8,7 +8,7 @@ use tree_sitter_language::LanguageFn;
 
 use crate::{
     lex::{self, Token},
-    source::{Failure, Source},
+    source::{Failure, Source, Stage},
 };
 
 unsafe extern "C" {
@@ -33,7 +33,7 @@ impl Document {
         let mut parser = Parser::new();
         parser
             .set_language(&language)
-            .map_err(|e| Failure::new(0, format!("grammar ABI failure: {e}")))?;
+            .map_err(|e| Failure::new(Stage::Parser, 0, format!("grammar ABI failure: {e}")))?;
         let bytes = &source.text().as_bytes()[source.body_start()..];
         let started = Instant::now();
         let mut cancel = |_: &tree_sitter::ParseState| started.elapsed() > Duration::from_secs(2);
@@ -43,7 +43,13 @@ impl Document {
                 None,
                 Some(ParseOptions::new().progress_callback(&mut cancel)),
             )
-            .ok_or_else(|| Failure::new(0, "parse budget exceeded; source was not changed"))?;
+            .ok_or_else(|| {
+                Failure::new(
+                    Stage::Parser,
+                    0,
+                    "parse budget exceeded; source was not changed",
+                )
+            })?;
         // The pinned grammar can split an inline function's X+Y into a body X
         // plus a sibling unary +Y without ERROR. Refuse unseparated top-level
         // statements on one physical line instead of trusting that recovery.
@@ -64,6 +70,7 @@ impl Document {
                         .any(|t| t.kind == lex::Kind::Code && t.text(source) == ";");
                     if !separated {
                         return Err(Failure::new(
+                            Stage::Parser,
                             start,
                             "ambiguous adjacent top-level statements; inline binary function bodies are unsupported by the pinned grammar",
                         ));
@@ -125,12 +132,14 @@ impl Document {
             }
             if node.is_error() || node.is_missing() {
                 return Err(Failure::new(
+                    Stage::Parser,
                     node.start_byte() + source.body_start(),
                     "unsupported or incomplete Verse syntax; use UEFN for compiler diagnostics",
                 ));
             }
             if depth > 512 || shape.len() >= 1_000_000 {
                 return Err(Failure::new(
+                    Stage::Parser,
                     node.start_byte() + source.body_start(),
                     "syntax tree resource limit exceeded",
                 ));
@@ -148,6 +157,7 @@ impl Document {
                 if !cursor.goto_parent() {
                     if let Some((start, _)) = unmatched_comments.into_iter().min() {
                         return Err(Failure::new(
+                            Stage::Parser,
                             start,
                             "unsupported block comment boundary: lexer and CST disagree; source was not changed",
                         ));
