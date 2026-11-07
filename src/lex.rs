@@ -1,7 +1,7 @@
 //! Strict, lossless lexical guard independent of tree-sitter recovery.
 use std::ops::Range;
 
-use crate::source::{Failure, MAX_NESTING, Source};
+use crate::source::{Failure, MAX_NESTING, Source, Stage};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Kind {
@@ -53,7 +53,7 @@ impl Scanner<'_> {
     }
     fn guard(&self, i: usize, level: usize) -> Result<(), Failure> {
         if level > MAX_NESTING {
-            Err(Failure::new(i, "nesting exceeds 256 levels"))
+            Err(Failure::new(Stage::Lexer, i, "nesting exceeds 256 levels"))
         } else {
             Ok(())
         }
@@ -64,6 +64,7 @@ impl Scanner<'_> {
         while i < self.bytes.len() {
             if self.starts(i, "<#>") {
                 return Err(Failure::new(
+                    Stage::Lexer,
                     i,
                     "indented <#> comments are not supported yet",
                 ));
@@ -82,7 +83,11 @@ impl Scanner<'_> {
                 i = self.next(i);
             }
         }
-        Err(Failure::new(start, "unterminated block comment"))
+        Err(Failure::new(
+            Stage::Lexer,
+            start,
+            "unterminated block comment",
+        ))
     }
 
     fn character(&self, start: usize) -> Result<usize, Failure> {
@@ -93,6 +98,7 @@ impl Scanner<'_> {
             i = self.next(i);
         } else {
             return Err(Failure::new(
+                Stage::Lexer,
                 start,
                 "unsupported or incomplete character literal",
             ));
@@ -101,6 +107,7 @@ impl Scanner<'_> {
             Ok(i + 1)
         } else {
             Err(Failure::new(
+                Stage::Lexer,
                 start,
                 "unsupported quoted identifier or character literal",
             ))
@@ -116,6 +123,7 @@ impl Scanner<'_> {
             Ok(start + 2)
         } else {
             Err(Failure::new(
+                Stage::Lexer,
                 start,
                 "unsupported or incomplete escape sequence",
             ))
@@ -132,6 +140,7 @@ impl Scanner<'_> {
                 b'{' => i = self.interpolation(i + 1, level + 1)?,
                 b'\n' | b'\r' => {
                     return Err(Failure::new(
+                        Stage::Lexer,
                         i,
                         "multiline string literals are not supported yet",
                     ));
@@ -139,7 +148,11 @@ impl Scanner<'_> {
                 _ => i = self.next(i),
             }
         }
-        Err(Failure::new(start, "unterminated string literal"))
+        Err(Failure::new(
+            Stage::Lexer,
+            start,
+            "unterminated string literal",
+        ))
     }
 
     fn interpolation(&self, mut i: usize, level: usize) -> Result<usize, Failure> {
@@ -168,14 +181,22 @@ impl Scanner<'_> {
                         return Ok(i + 1);
                     }
                     if delimiters.pop() != Some(opener(self.bytes[i])) {
-                        return Err(Failure::new(i, "unbalanced interpolation delimiters"));
+                        return Err(Failure::new(
+                            Stage::Lexer,
+                            i,
+                            "unbalanced interpolation delimiters",
+                        ));
                     }
                     i += 1;
                 }
                 _ => i = self.next(i),
             }
         }
-        Err(Failure::new(start, "unterminated string interpolation"))
+        Err(Failure::new(
+            Stage::Lexer,
+            start,
+            "unterminated string interpolation",
+        ))
     }
 }
 
@@ -204,7 +225,11 @@ pub fn scan(source: &Source) -> Result<Vec<Token>, Failure> {
     }
     while i < scanner.bytes.len() {
         if tokens.len() >= 250_000 {
-            return Err(Failure::new(i, "source exceeds 250000 lexical tokens"));
+            return Err(Failure::new(
+                Stage::Lexer,
+                i,
+                "source exceeds 250000 lexical tokens",
+            ));
         }
         let start = i;
         let kind = match scanner.bytes[i] {
@@ -248,7 +273,7 @@ pub fn scan(source: &Source) -> Result<Vec<Token>, Failure> {
             }
             b')' | b']' | b'}' => {
                 if delimiters.pop() != Some(opener(scanner.bytes[i])) {
-                    return Err(Failure::new(i, "unbalanced delimiters"));
+                    return Err(Failure::new(Stage::Lexer, i, "unbalanced delimiters"));
                 }
                 i += 1;
                 Kind::Code
@@ -275,6 +300,7 @@ pub fn scan(source: &Source) -> Result<Vec<Token>, Failure> {
                     let ch = scanner.text[i..].chars().next().unwrap();
                     if !ch.is_ascii() || !":=<>+-*/.,;?@&|!%^~".contains(ch) {
                         return Err(Failure::new(
+                            Stage::Lexer,
                             i,
                             "unsupported source token (Unicode in literals/comments is supported)",
                         ));
@@ -290,7 +316,7 @@ pub fn scan(source: &Source) -> Result<Vec<Token>, Failure> {
         });
     }
     if !delimiters.is_empty() {
-        return Err(Failure::new(i, "unclosed delimiter"));
+        return Err(Failure::new(Stage::Lexer, i, "unclosed delimiter"));
     }
     Ok(tokens)
 }

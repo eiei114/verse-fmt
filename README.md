@@ -16,7 +16,16 @@ cargo run -- path/to/device.verse --check  # exit 0 clean, 1 needs formatting, 2
 cargo run -- . --diff                     # preview project changes
 cargo run -- . --write                    # modify eligible sources after preflight
 cargo run -- --show-config                # effective verse.toml settings
+cargo run -- . --check --output-format json  # one versioned JSON object on stdout
 ```
+
+`--output-format text|json` selects the stdout format; `text` is the default and
+unchanged. The `json` envelope, its schema and the stability promise are in the
+[report contract](docs/report-contract.md) and
+[`diagnostics.schema.json`](docs/diagnostics.schema.json), so CI can read
+formatter results as structured data and join on a `/`-separated path relative
+to the config root. `json` never changes an exit code and never becomes a
+success signal by itself.
 
 `-` reads UTF-8 stdin. `--stdin-filepath` supplies a virtual name only. Prefer
 file input on Windows PowerShell 5.1, whose pipelines/redirection may change
@@ -29,7 +38,8 @@ blank-line runs and the final newline. Ambiguous indentation is rejected.
 
 Every result is reparsed and checked for token/structure preservation and
 idempotence. See [parser design](docs/parser-design.md) and
-[coverage/limitations](docs/grammar-coverage.md), [CLI/config](docs/cli.md) and
+[coverage/limitations](docs/grammar-coverage.md), [CLI/config](docs/cli.md),
+[JSON report contract](docs/report-contract.md) and
 [Windows write safety](docs/write-safety.md). The [local Windows performance
 baseline](docs/performance-baseline-2026-09-23.md) is informational, not a
 release target. See [local packaging and future mise usage](docs/packaging-and-mise.md).
@@ -43,9 +53,16 @@ not a claim that earlier Rust versions cannot work. Install the MSVC build tools
 when building from source. Consumers of future prebuilt binaries will not need Cargo.
 
 ```powershell
-./scripts/verify.ps1
+pwsh -NoProfile -File scripts/verify.ps1
 cargo run -- --help
 ```
+
+`verify.ps1` runs the pinned-toolchain checks plus `scripts/verify-json.ps1`,
+which validates real release-binary JSON output for exit 0/1/2 against
+`docs/diagnostics.schema.json`, including a write that fails before committing
+and an input path given absolutely. Both scripts declare `#Requires -Version 7`:
+they use `ProcessStartInfo.ArgumentList` and `Test-Json -SchemaFile`, so Windows
+PowerShell 5.1 refuses them immediately instead of failing after the Rust build.
 
 `cargo fmt` formats this project's Rust source; `verse-fmt` will format Verse.
 Tests and the release build do not replace manual UEFN acceptance. CI never

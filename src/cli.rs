@@ -2,12 +2,19 @@ use std::path::PathBuf;
 
 use clap::{Parser, ValueEnum};
 
-#[derive(Clone, Copy, Debug, Default, ValueEnum)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, ValueEnum)]
 pub enum Color {
     #[default]
     Auto,
     Always,
     Never,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, ValueEnum)]
+pub enum OutputFormat {
+    #[default]
+    Text,
+    Json,
 }
 
 #[derive(Debug, Parser)]
@@ -41,6 +48,9 @@ pub struct Cli {
     pub verbose: bool,
     #[arg(long, value_enum, default_value_t = Color::Auto)]
     pub color: Color,
+    /// stdout report format; `json` emits one versioned envelope and no other text.
+    #[arg(long, value_enum, default_value_t = OutputFormat::Text)]
+    pub output_format: OutputFormat,
 }
 
 impl Cli {
@@ -54,6 +64,17 @@ impl Cli {
         }
         if self.stdin_filepath.is_some() && !stdin && !self.show_config {
             return Err("--stdin-filepath requires stdin '-'".into());
+        }
+        if self.output_format == OutputFormat::Json && self.diff {
+            return Err(
+                "--output-format json cannot be combined with --diff; the diff is human text"
+                    .into(),
+            );
+        }
+        if self.output_format == OutputFormat::Json && self.show_config {
+            return Err(
+                "--output-format json cannot be combined with --show-config; it prints TOML".into(),
+            );
         }
         if self.paths.is_empty() && !self.show_config {
             return Err(

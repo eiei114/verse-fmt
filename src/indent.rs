@@ -3,7 +3,7 @@ use std::{collections::BTreeMap, ops::Range};
 
 use crate::{
     lex::{Kind, Token},
-    source::{Failure, MAX_NESTING, Source},
+    source::{Failure, MAX_NESTING, Source, Stage},
 };
 
 #[derive(Debug)]
@@ -61,6 +61,7 @@ pub fn analyze(source: &Source, tokens: &[Token]) -> Result<Indentation, Failure
         if code_line && brackets == 0 {
             if source.text()[start..content].contains('\t') {
                 return Err(Failure::new(
+                    Stage::Structure,
                     start,
                     "tab indentation cannot be safely normalized; replace it explicitly first",
                 ));
@@ -70,13 +71,18 @@ pub fn analyze(source: &Source, tokens: &[Token]) -> Result<Indentation, Failure
             if width > current {
                 if !matches!(previous_code, ":" | "=" | ":=" | "=>") {
                     return Err(Failure::new(
+                        Stage::Structure,
                         content,
                         "unsupported indentation continuation; source was not changed",
                     ));
                 }
                 widths.push(width);
                 if widths.len() > MAX_NESTING {
-                    return Err(Failure::new(content, "indentation exceeds 256 levels"));
+                    return Err(Failure::new(
+                        Stage::Structure,
+                        content,
+                        "indentation exceeds 256 levels",
+                    ));
                 }
             } else {
                 while width < *widths.last().unwrap() {
@@ -84,6 +90,7 @@ pub fn analyze(source: &Source, tokens: &[Token]) -> Result<Indentation, Failure
                 }
                 if width != *widths.last().unwrap() {
                     return Err(Failure::new(
+                        Stage::Structure,
                         content,
                         "inconsistent dedent; use UEFN to check the source",
                     ));

@@ -1,4 +1,9 @@
+#Requires -Version 7
 # Works in a fresh PowerShell shell. Leaves build artifacts for further inspection.
+# PowerShell 7 is required, not merely recommended: verify-json.ps1 uses
+# ProcessStartInfo.ArgumentList and Test-Json -SchemaFile, which Windows
+# PowerShell 5.1 lacks. Declaring it here fails immediately on 5.1 instead of
+# after the whole Rust build.
 $ErrorActionPreference = 'Stop'
 $saved = @{ Path = $env:Path; RUSTUP_TOOLCHAIN = $env:RUSTUP_TOOLCHAIN; RUSTC = $env:RUSTC; RUSTDOC = $env:RUSTDOC }
 Push-Location (Split-Path -Parent $PSScriptRoot)
@@ -33,6 +38,8 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'cargo test failed' }
     cargo build --release --locked --target x86_64-pc-windows-msvc
     if ($LASTEXITCODE -ne 0) { throw 'Windows release build failed' }
+    & "$PSScriptRoot/verify-json.ps1"
+    if ($LASTEXITCODE -ne 0) { throw 'JSON report contract failed' }
     Write-Output 'Verification passed (UEFN acceptance is a separate gate).'
 } finally {
     foreach ($key in $saved.Keys) { [Environment]::SetEnvironmentVariable($key, $saved[$key], 'Process') }
