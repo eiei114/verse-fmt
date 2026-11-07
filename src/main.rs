@@ -95,16 +95,21 @@ impl Machine {
         machine::sanitize(message, self.root.as_deref().unwrap_or(Path::new("")))
     }
 
+    /// Report form of a text label: unchanged when it is already relative.
+    fn path(&self, label: &str) -> String {
+        machine::path(label, self.root.as_deref().unwrap_or(Path::new("")))
+    }
+
     fn error(&mut self, path: Option<String>, message: &str) {
         self.errors.push(ExecutionError {
-            path,
+            path: path.map(|path| self.path(&path)),
             message: self.sanitize(message),
         });
     }
 
     fn file(&mut self, path: String, status: Status, reason: Option<Reason>) {
         self.files.push(FileReport {
-            path,
+            path: self.path(&path),
             status,
             reason,
         });
@@ -127,6 +132,7 @@ impl Machine {
     /// Replace the status already recorded for a path. Paths are unique per
     /// invocation, so no second report entry is ever appended.
     fn restatus(&mut self, path: &str, status: Status, reason: Option<Reason>) {
+        let path = self.path(path);
         if let Some(entry) = self.files.iter_mut().find(|entry| entry.path == path) {
             entry.status = status;
             entry.reason = reason;

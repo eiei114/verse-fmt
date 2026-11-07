@@ -163,7 +163,11 @@ directory when there is none. For stdin the label is `<stdin>`, or the
 `--stdin-filepath` value with `/` separators.
 
 An entry never contains an absolute path. Names outside the root (via `..`) are
-still emitted as the relative label the text path prints.
+still emitted as the relative label the text path prints. A label the text path
+prints as an absolute path — an absolute `--stdin-filepath`, or a file the root
+cannot relativize, such as one on another volume or reached through a UNC
+alias — is rewritten the same way as `message`: relativized against the root
+when possible, masked with `<abs>/` otherwise. The text path is unchanged.
 
 ## Determinism
 

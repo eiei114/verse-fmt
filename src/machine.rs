@@ -24,6 +24,27 @@ pub fn sanitize(message: &str, root: &Path) -> String {
     mask_absolute(&text)
 }
 
+/// Machine-safe form of a report `path`.
+///
+/// A label the root can relativize is already a `/`-separated relative path
+/// and is returned unchanged, byte-identical to what the text path prints. An
+/// absolute label (a `--stdin-filepath` given as an absolute path, or a file the
+/// root cannot relativize, such as one reached through another volume or a UNC
+/// alias) gets the same treatment as a message: relativized against the root
+/// when it lies on the root's volume, masked otherwise.
+pub fn path(label: &str, root: &Path) -> String {
+    if !Path::new(label).is_absolute() {
+        return label.to_owned();
+    }
+    // Labels are already `/`-separated; restore the native spelling so the
+    // verbatim and root prefixes `sanitize` knows can match it.
+    #[cfg(windows)]
+    let native = label.replace('/', "\\");
+    #[cfg(not(windows))]
+    let native = label.to_owned();
+    sanitize(&native, root).replace('\\', "/")
+}
+
 /// Drops the Windows verbatim prefixes `fs::canonicalize` returns, so the path
 /// text in a diagnostic matches the spellings [`prefixes`] can generate from an
 /// ordinary configuration root.
@@ -335,6 +356,46 @@ mod tests {
                 "{sanitized}"
             );
             assert!(!sanitized.contains("C:\\\\"), "{sanitized}");
+        }
+    }
+
+    #[test]
+    fn a_relative_path_label_is_unchanged() {
+        let root = root();
+        for label in [
+            "a.verse",
+            "日本語 project/nested folder/a.verse",
+            "../other/x.verse",
+            "<stdin>",
+        ] {
+            assert_eq!(path(label, &root), label);
+        }
+    }
+
+    #[test]
+    fn an_absolute_path_label_below_or_beside_the_root_is_relativized() {
+        let root = root();
+        let below = root.join("sub").join("a.verse");
+        let below = below.to_string_lossy().replace('\\', "/");
+        assert_eq!(path(&below, &root), "sub/a.verse");
+        let beside = root.parent().unwrap().join("other").join("x.verse");
+        let beside = beside.to_string_lossy().replace('\\', "/");
+        assert_eq!(path(&beside, &root), "../other/x.verse");
+    }
+
+    /// `files::label` falls back to the canonical absolute path when the root
+    /// cannot relativize it; the report must not carry that spelling.
+    #[cfg(windows)]
+    #[test]
+    fn an_absolute_path_label_the_root_cannot_relativize_is_masked() {
+        let root = Path::new("\\\\?\\C:\\work\\verse-fmt");
+        for (label, expected) in [
+            ("//?/D:/other/x.verse", "<abs>/other/x.verse"),
+            ("//?/UNC/server/share/x.verse", "<abs>/server/share/x.verse"),
+            ("D:/other/x.verse", "<abs>/other/x.verse"),
+            ("//?/C:/work/verse-fmt/sub/a.verse", "sub/a.verse"),
+        ] {
+            assert_eq!(path(label, root), expected, "{label}");
         }
     }
 

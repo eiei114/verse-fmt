@@ -432,6 +432,53 @@ fn machine_messages_carry_no_absolute_paths_while_stderr_keeps_them() {
     assert!(stderr.contains('\\'), "{stderr}");
 }
 
+/// `files[].path` is held to the same rule as messages: an absolute
+/// `--stdin-filepath` reaches the envelope root-relative (or masked when the
+/// host spelling differs from the canonical root), while the text path keeps
+/// printing the label exactly as given.
+#[test]
+fn an_absolute_stdin_filepath_is_not_reported_as_an_absolute_path() {
+    use std::io::Write as _;
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path();
+    let virtual_path = root.join("sub").join("s.verse");
+    let virtual_path = virtual_path.to_str().unwrap();
+    let pipe = |args: &[&str]| {
+        let mut child = Command::new(env!("CARGO_BIN_EXE_verse-fmt"))
+            .current_dir(root)
+            .args(args)
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .spawn()
+            .unwrap();
+        child.stdin.take().unwrap().write_all(b"A:=1\n").unwrap();
+        child.wait_with_output().unwrap()
+    };
+
+    let out = pipe(&[
+        "-",
+        "--stdin-filepath",
+        virtual_path,
+        "--check",
+        "--output-format",
+        "json",
+    ]);
+    assert_eq!(out.status.code(), Some(1), "{out:?}");
+    let report = envelope(&out);
+    let path = report["files"][0]["path"].as_str().unwrap();
+    assert_relative(path, &report);
+    assert!(path.ends_with("sub/s.verse"), "{report}");
+    assert_eq!(report["files"][0]["status"], "would-format", "{report}");
+
+    let text = pipe(&["-", "--stdin-filepath", virtual_path, "--check"]);
+    assert_eq!(text.status.code(), Some(1), "{text:?}");
+    assert_eq!(
+        String::from_utf8(text.stdout).unwrap(),
+        format!("{}\n", virtual_path.replace('\\', "/"))
+    );
+}
+
 /// A successful `--write` still reports `formatted` for exactly the files that
 /// were replaced, and `--write` without a failure is unchanged.
 #[test]
