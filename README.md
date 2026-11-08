@@ -17,15 +17,24 @@ cargo run -- . --diff                     # preview project changes
 cargo run -- . --write                    # modify eligible sources after preflight
 cargo run -- --show-config                # effective verse.toml settings
 cargo run -- . --check --output-format json  # one versioned JSON object on stdout
+cargo run -- . --check --explain         # executed stages and full failure chain
 ```
 
-`--output-format text|json` selects the stdout format; `text` is the default and
-unchanged. The `json` envelope, its schema and the stability promise are in the
+`--output-format text|json` selects the stdout format; `text` is the default.
+The `json` envelope, its schema and the stability promise are in the
 [report contract](docs/report-contract.md) and
 [`diagnostics.schema.json`](docs/diagnostics.schema.json), so CI can read
 formatter results as structured data and join on a `/`-separated path relative
 to the config root. `json` never changes an exit code and never becomes a
 success signal by itself.
+
+Every refusal names the stage that stopped processing, in text as a trailing
+`[stage=…]` marker and in JSON as `reason.stage`. An adjacent-structure guard
+refusal is the primary reason and also reports the underlying raw parse error as
+a secondary one, so fixing the guard symptom does not reveal a second failure
+later. `--explain` (text only) prints the executed stage order and the whole
+failure chain; `--output-format json` exposes the same split as `reason.class`
+and `reason.underlying`.
 
 `-` reads UTF-8 stdin. `--stdin-filepath` supplies a virtual name only. Prefer
 file input on Windows PowerShell 5.1, whose pipelines/redirection may change
@@ -59,8 +68,9 @@ cargo run -- --help
 
 `verify.ps1` runs the pinned-toolchain checks plus `scripts/verify-json.ps1`,
 which validates real release-binary JSON output for exit 0/1/2 against
-`docs/diagnostics.schema.json`, including a write that fails before committing
-and an input path given absolutely. Both scripts declare `#Requires -Version 7`:
+`docs/diagnostics.schema.json`, including a write that fails before committing,
+an input path given absolutely, and a guard refusal that reports its underlying
+parse error as a secondary failure. Both scripts declare `#Requires -Version 7`:
 they use `ProcessStartInfo.ArgumentList` and `Test-Json -SchemaFile`, so Windows
 PowerShell 5.1 refuses them immediately instead of failing after the Rust build.
 

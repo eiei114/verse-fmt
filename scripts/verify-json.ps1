@@ -83,7 +83,67 @@ try {
     Assert-Equal $report.executionErrors.Count 1 'executionErrors count'
     Assert-Equal $report.executionErrors[0].path 'nested folder/broken.verse' 'executionErrors path'
     if (-not $check.Stderr.Contains('broken.verse')) { throw 'refusal did not also reach stderr' }
+    if (-not $check.Stderr.Contains('[stage=lexer]')) {
+        throw 'the text diagnostic lost its stage marker'
+    }
     if ($check.Stderr.Contains([char]27)) { throw 'stderr contains an ANSI escape for a redirected stream' }
+
+    # ---- a guard refusal also reports the underlying parse error ----------
+    # Self-authored: an inline top-level binary function body (what the guard
+    # refuses) plus markup the base grammar rejects (the raw ERROR underneath).
+    # The guard stays primary; the parse error is secondary, at its own offset.
+    $guardProject = Join-Path $workspace 'guard failure'
+    New-Item -ItemType Directory $guardProject | Out-Null
+    Set-Content -LiteralPath (Join-Path $guardProject 'guard.verse') -Value "Add(Left:int,Right:int):int = Left+Right`nBanner:=<p>Plain text</p>" -NoNewline
+    $guard = Invoke-VerseFmt @('guard.verse', '--check', '--output-format', 'json') $guardProject
+    Assert-Equal $guard.ExitCode 2 'guard refusal'
+    $report = Assert-Envelope $guard 'guard refusal'
+    $reason = $report.files[0].reason
+    Assert-Equal $reason.stage 'parser' 'guard reason stage'
+    Assert-Equal $reason.class 'guard' 'guard reason class'
+    Assert-Equal $report.files[0].status 'refused' 'guard status'
+    Assert-Equal @($reason.underlying).Count 1 'guard underlying count'
+    Assert-Equal $reason.underlying[0].class 'parse' 'underlying class'
+    Assert-Equal $reason.underlying[0].stage 'parser' 'underlying stage'
+    Assert-Equal $reason.underlying[0].nodeKind 'ERROR' 'underlying node kind'
+    if ($reason.underlying[0].offset -le $reason.offset) {
+        throw 'the underlying parse error must have its own later offset'
+    }
+    if (-not $reason.underlying[0].message.Contains('underlying parse error')) {
+        throw 'the secondary failure does not name itself as the underlying cause'
+    }
+    $guardText = Invoke-VerseFmt @('guard.verse', '--check', '--explain') $guardProject
+    Assert-Equal $guardText.ExitCode 2 'guard refusal with --explain'
+    if (-not $guardText.Stderr.Contains('stages: source -> lexer -> parser')) {
+        throw '--explain did not print the executed stage order'
+    }
+    if (-not $guardText.Stderr.Contains('failure 1 (primary, parser/guard')) {
+        throw '--explain did not mark the guard as primary'
+    }
+    if (-not $guardText.Stderr.Contains('failure 2 (secondary, parser/parse, ERROR')) {
+        throw '--explain did not report the underlying parse error as secondary'
+    }
+    if ($guardText.Stdout -ne '') {
+        throw '--explain must not add anything to stdout for a refused source'
+    }
+
+    # A guard refusal with no raw parse error reports no secondary entry.
+    Set-Content -LiteralPath (Join-Path $guardProject 'guard-only.verse') -Value 'Add(Left:int,Right:int):int = Left+Right' -NoNewline
+    $guardOnly = Invoke-VerseFmt @('guard-only.verse', '--check', '--output-format', 'json') $guardProject
+    Assert-Equal $guardOnly.ExitCode 2 'guard-only refusal'
+    $report = Assert-Envelope $guardOnly 'guard-only refusal'
+    Assert-Equal $report.files[0].reason.class 'guard' 'guard-only class'
+    if ($null -ne $report.files[0].reason.underlying) {
+        throw 'a guard-only refusal must not report a fabricated secondary failure'
+    }
+
+    # --explain is text only and refuses the machine format.
+    $explainJson = Invoke-VerseFmt @('guard.verse', '--check', '--explain', '--output-format', 'json') $guardProject
+    Assert-Equal $explainJson.ExitCode 2 '--explain with --output-format json'
+    if ($explainJson.Stdout -ne '') { throw '--explain with json still wrote to stdout' }
+    if (-not $explainJson.Stderr.Contains('--explain is text only')) {
+        throw '--explain with json did not explain the conflict'
+    }
 
     # ---- exit 1 for pending changes only ---------------------------------
     Remove-Item -LiteralPath (Join-Path $project 'nested folder/broken.verse')

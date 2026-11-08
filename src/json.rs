@@ -5,7 +5,7 @@
 //! `docs/report-contract.md` and `docs/diagnostics.schema.json`.
 use serde::Serialize;
 
-use crate::source::Stage;
+use crate::source::{Class, Stage, Underlying};
 
 pub const SCHEMA_VERSION: u32 = 1;
 
@@ -50,6 +50,14 @@ pub struct Reason {
     pub message: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub offset: Option<usize>,
+    /// Present only where one stage has two distinguishable origins: `guard`
+    /// for the adjacent-structure refusal, `parse` for a raw CST error.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub class: Option<Class>,
+    /// Failures recorded after the primary one that stopped processing. The
+    /// adjacent guard is primary; a raw parse error underneath it is secondary.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub underlying: Vec<Underlying>,
 }
 
 #[derive(Debug, Serialize)]
@@ -112,5 +120,7 @@ pub fn change_reason() -> Reason {
         stage: Stage::Layout,
         message: "formatter output differs from the source".into(),
         offset: None,
+        class: None,
+        underlying: Vec::new(),
     }
 }

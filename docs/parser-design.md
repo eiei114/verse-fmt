@@ -84,8 +84,7 @@ closed. This is a parser-safety bound, not a Verse language limit.
    they are not silently copied and reported as supported.
    Also reject unseparated same-line top-level nodes. Corpus investigation found
    the pinned grammar can parse a top-level inline function's `X+Y` as body X
-   followed by a separate unary +Y, without any ERROR. Do not trust that tree.
-5. Reparse output and compare the full CST shape and all non-trivia lexical
+   followed by a separate unary +Y, without any ERROR. Do not trust that tree.5. Reparse output and compare the full CST shape and all non-trivia lexical
    tokens, including exact literal/comment bytes. Tree comparison detects
    changing a method's containing block even with identical code tokens.
 6. Render again and require byte-identical output. Refuse source output/write
@@ -115,6 +114,33 @@ mitigates unsafe acceptance rather than repairing comment syntax or adding P2
 multiline-if support. `tests/comment-boundary.rs` covers refusal, all-input
 write prevention, nested/multiple comments, opaque literals, BOM/CRLF and stable
 earliest-error positions using independently authored examples.
+
+## Primary and secondary failures
+
+The adjacent-structure guard runs **before** the ERROR/MISSING walk and stays
+first: it is the primary refusal for every source it covers, and this slice does
+not relax it, skip the parse-error scan, or make a guarded file succeed.
+
+What changed is only the reporting. When the guard refuses a source, the walk
+still runs so the tool can report that the same tree also contains a raw parse
+error. The guard outcome stays primary and is marked as a guard outcome; the raw
+parse error is attached as a **secondary** finding with its byte offset, its
+tree-sitter node kind (`ERROR`, or `MISSING <kind>`) and a message naming it as
+the underlying cause. A raw `ERROR` is therefore never reported as evidence
+that the guard is wrong, and a guard-only refusal — one with no raw ERROR at
+all — reports no secondary entry at all. No secondary failure is fabricated.
+
+This matters because a reader who only sees the guard message fixes a guard
+symptom and discovers the real parse error afterwards. Diagnosing the second
+failure sooner is not a coverage improvement: the tool accepts no new source
+because of it, and whether the guard itself is the right policy is a separate
+question. `stage` stays `parser` for both outcomes; the `class` field
+(`guard` / `parse`) is what separates them, in text as `[class=…]` and in the
+JSON report as `reason.class` plus `reason.underlying`.
+
+`tests/diagnostics-stage.rs` covers this with self-authored fixtures: an inline
+top-level binary function body, unseparated adjacent top-level statements, and
+both shapes combined with markup the base grammar refuses as a raw ERROR.
 
 ## Reproducible checks
 
