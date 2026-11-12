@@ -130,6 +130,17 @@ fn a_guard_refusal_also_reports_the_underlying_parse_error() {
         "{text}"
     );
     assert!(text.contains("underlying parse error"), "{text}");
+    // `diagnostic()` adds `verse-fmt: ` once, around the whole message: the
+    // secondary line starts with the file label instead of repeating it.
+    let secondary = text
+        .lines()
+        .find(|line| line.contains("underlying parse error"))
+        .unwrap();
+    assert!(
+        secondary.starts_with("case.verse:2:9:"),
+        "a secondary line must not repeat the verse-fmt: prefix: {secondary}"
+    );
+    assert_eq!(text.matches("verse-fmt: ").count(), 1, "{text}");
     assert!(out.stdout.is_empty(), "{out:?}");
 }
 
@@ -252,6 +263,48 @@ fn explain_with_json_is_rejected_with_exit_two() {
     assert_eq!(out.status.code(), Some(2), "{out:?}");
     assert!(out.stdout.is_empty(), "{out:?}");
     assert!(stderr(&out).contains("--explain is text only"), "{out:?}");
+}
+
+/// An `--explain` stage list always ends at the stage that stopped processing,
+/// for the later stages the binary can actually reach. A structure failure
+/// happens while the trace tail is `structure` and a layout failure while it is
+/// `layout`, so each must print that stage last rather than the reparse's
+/// `parser`.
+#[test]
+fn explain_stage_lists_end_at_the_stage_that_stopped_processing() {
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path();
+    // `A()` followed by a deeper `B()` line is neither a block introducer nor a
+    // supported continuation, so `structure` is the stage that stops processing.
+    for (file, text) in [
+        ("tab.verse", "f():void =\n\tA()\n"),
+        ("unsupported.verse", "A()\n  B()\n"),
+    ] {
+        put(root, file, text);
+        let out = run(root, &["--check", "--explain", file]);
+        assert_eq!(out.status.code(), Some(2), "{file}: {out:?}");
+        let text = stderr(&out);
+        assert!(text.contains("[stage=structure]"), "{file}: {text}");
+        assert!(
+            text.contains("stages: source -> lexer -> parser -> structure"),
+            "{file}: {text}"
+        );
+        assert!(out.stdout.is_empty(), "{file}: {out:?}");
+    }
+
+    // A forced line ending that would rewrite a protected span stops in
+    // `layout`, the last stage the source entered before the failure.
+    put(root, "verse.toml", "[format]\nline-ending = \"lf\"\n");
+    put(root, "protected.verse", "<# mixed\r\nLF\n#>\nA:=1\n");
+    let out = run(root, &["--check", "--explain", "protected.verse"]);
+    assert_eq!(out.status.code(), Some(2), "{out:?}");
+    let text = stderr(&out);
+    assert!(text.contains("[stage=layout]"), "{text}");
+    assert!(
+        text.contains("stages: source -> lexer -> parser -> structure -> layout"),
+        "{text}"
+    );
+    assert!(out.stdout.is_empty(), "{out:?}");
 }
 
 /// A source that only needs formatting keeps its current behaviour: no stage

@@ -84,7 +84,8 @@ closed. This is a parser-safety bound, not a Verse language limit.
    they are not silently copied and reported as supported.
    Also reject unseparated same-line top-level nodes. Corpus investigation found
    the pinned grammar can parse a top-level inline function's `X+Y` as body X
-   followed by a separate unary +Y, without any ERROR. Do not trust that tree.5. Reparse output and compare the full CST shape and all non-trivia lexical
+   followed by a separate unary +Y, without any ERROR. Do not trust that tree.
+5. Reparse output and compare the full CST shape and all non-trivia lexical
    tokens, including exact literal/comment bytes. Tree comparison detects
    changing a method's containing block even with identical code tokens.
 6. Render again and require byte-identical output. Refuse source output/write

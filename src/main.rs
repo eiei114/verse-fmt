@@ -262,11 +262,17 @@ impl FileFailure {
 
 /// The executed stages, ending at the stage that stopped processing. A failure
 /// that happened before any traced stage (a discovery or read failure) reports
-/// just its own stage. `validation` re-entry is mapped to `validation` itself,
-/// so the last printed stage is always the one that failed.
+/// just its own stage.
+///
+/// The trace is not monotonic: `validation` re-enters `lexer` and `parser` to
+/// reparse the formatter's own output, so a structure, layout or validation
+/// failure can happen while the trace tail is already `parser`. Only appending a
+/// stage the trace has not reached at all would leave such a trace ending at the
+/// reparse's `parser` instead of the stage that stopped processing, so the
+/// comparison is against the current tail.
 fn stages_with(trace: &Trace, stage: Stage) -> Vec<Stage> {
     let mut stages = trace.stages().to_vec();
-    if !stages.contains(&stage) {
+    if stages.last() != Some(&stage) {
         stages.push(stage);
     }
     stages
@@ -651,6 +657,53 @@ mod tests {
         assert_eq!(
             std::fs::read(root.path().join("b.verse")).unwrap(),
             b"B:=2\n"
+        );
+    }
+
+    /// The stage list `--explain` prints must end at the stage that stopped
+    /// processing even when `validation` re-entered `lexer`/`parser` to reparse
+    /// the formatter's own output. Appending only a stage the trace never
+    /// reached would print `... -> parser` for a structure, layout or validation
+    /// failure that happened after the reparse.
+    #[test]
+    fn stages_end_at_the_stage_that_stopped_processing_after_a_validation_reparse() {
+        let mut trace = Trace::default();
+        for stage in [
+            Stage::Source,
+            Stage::Lexer,
+            Stage::Parser,
+            Stage::Structure,
+            Stage::Layout,
+            Stage::Validation,
+            Stage::Lexer,
+            Stage::Parser,
+        ] {
+            trace.enter(stage);
+        }
+        let reentered = trace.stages().to_vec();
+
+        // Stage failures of the second `indent::analyze`, `layout`, and the
+        // preservation/idempotence checks are all already contained in the
+        // trace: each still has to end the printed list.
+        for stage in [Stage::Structure, Stage::Layout, Stage::Validation] {
+            let stages = stages_with(&trace, stage);
+            assert_eq!(&stages[..reentered.len()], &reentered[..], "{stage:?}");
+            assert_eq!(stages.last(), Some(&stage), "{stage:?}");
+            assert_eq!(stages.len(), reentered.len() + 1, "{stage:?}");
+        }
+
+        // A failure in the stage the trace already ends at must not repeat it.
+        assert_eq!(stages_with(&trace, Stage::Parser), reentered);
+        assert_eq!(
+            stages_with(&trace, Stage::Lexer).last(),
+            Some(&Stage::Lexer)
+        );
+
+        // A failure before any traced stage reports just its own stage.
+        let empty = Trace::default();
+        assert_eq!(
+            stages_with(&empty, Stage::Discovery),
+            vec![Stage::Discovery]
         );
     }
 

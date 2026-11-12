@@ -21,8 +21,15 @@ enabled, Auto disables color for that stream.
 
 `--output-format text|json` selects the stdout format. `text` is the default and
 is byte-identical to omitting the flag for stdout, stderr and exit code on the
-success path; every diagnostic gained the stable `[stage=…]` marker described
-below. `json` writes exactly one versioned object on stdout and no other text;
+success path; every formatter diagnostic that names a stage gained the stable
+`[stage=…]` marker described below: a refusal, and a discovery, source-read,
+write-phase or reporting-envelope failure. Rejecting an invocation happens
+before any stage is known, so usage errors (stdin combined with paths, `--write`
+with stdin, `json` with `--diff`/`--show-config`/`--explain`, no input, a
+directory without a mode), a `--show-config` failure and a failure writing the
+ordinary stdout output (check labels, diff, formatted source) keep their
+unmarked wording. `json` writes exactly one versioned object on stdout and no
+other text;
 the envelope, field meanings, path normalization, ordering and stability promise
 are in [the report contract](report-contract.md) and
 [`diagnostics.schema.json`](diagnostics.schema.json).
@@ -55,8 +62,12 @@ greppable:
 ```text
 verse-fmt: device.verse:1:2: unterminated block comment [stage=lexer]
 verse-fmt: device.verse:1:35: ambiguous adjacent top-level statements; inline binary function bodies are unsupported by the pinned grammar [stage=parser] [class=guard]
-verse-fmt: device.verse:2:9: underlying parse error: ERROR node at byte 49; unsupported or incomplete Verse syntax [stage=parser] [class=parse]
+device.verse:2:9: underlying parse error: ERROR node at byte 49; unsupported or incomplete Verse syntax [stage=parser] [class=parse]
 ```
+
+The `verse-fmt:` prefix belongs to the primary diagnostic only. It is added
+once, around the whole stderr message, so a secondary line that follows it starts
+with the file label instead of repeating the prefix.
 
 The vocabulary is fixed: `discovery`, `source`, `lexer`, `parser`, `structure`,
 `layout`, `validation`, `write`, `reporting`. `[class=…]` appears only where one
@@ -75,7 +86,7 @@ after the ordinary concise diagnostic:
 
 ```text
 verse-fmt: device.verse:1:35: ambiguous adjacent top-level statements; ... [stage=parser] [class=guard]
-verse-fmt: device.verse:2:9: underlying parse error: ERROR node at byte 49; ... [stage=parser] [class=parse]
+device.verse:2:9: underlying parse error: ERROR node at byte 49; ... [stage=parser] [class=parse]
 verse-fmt explain: device.verse
   stages: source -> lexer -> parser
   failure 1 (primary, parser/guard, offset 34): 1:35: ambiguous adjacent top-level statements; ...

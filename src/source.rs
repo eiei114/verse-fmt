@@ -139,7 +139,7 @@ impl Failure {
 
     /// The adjacent-structure guard refused the source. The guard stays the
     /// primary refusal; an underlying parse error is attached later when the
-    /// same bounded CSS walk finds one.
+    /// same bounded CST walk finds one.
     pub fn guarded(offset: usize, message: impl Into<String>) -> Self {
         Self {
             stage: Stage::Parser,
