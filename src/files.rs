@@ -143,6 +143,7 @@ struct Walker<'a> {
     excludes: GlobSet,
     seen: HashSet<same_file::Handle>,
     visited: usize,
+    max_directory_entries: usize,
     result: Discovery,
 }
 
@@ -199,11 +200,11 @@ impl Walker<'_> {
             let added = add_ignore(path, ignores)?;
             let mut entries = fs::read_dir(path)
                 .map_err(|e| format!("{shown}: {e}"))?
-                .take(MAX_DIRECTORY_ENTRIES + 1)
+                .take(self.max_directory_entries + 1)
                 .map(|entry| entry.map(|e| e.path()))
                 .collect::<Result<Vec<_>, _>>()
                 .map_err(|e| format!("{shown}: {e}"))?;
-            if entries.len() > MAX_DIRECTORY_ENTRIES {
+            if entries.len() > self.max_directory_entries {
                 self.result.limit_exceeded = true;
                 return Err("directory entry resource limit exceeded".into());
             }
@@ -212,7 +213,8 @@ impl Walker<'_> {
                 if let Err(e) = self.visit(&child, false, ignores, depth + 1) {
                     self.result.errors.push(e);
                 }
-                if self.visited > MAX_VISITED_ENTRIES
+                if self.result.limit_exceeded
+                    || self.visited > MAX_VISITED_ENTRIES
                     || self.result.errors.len() >= MAX_DISCOVERY_ERRORS
                 {
                     break;
@@ -249,6 +251,7 @@ pub fn discover(inputs: &[PathBuf], root: &Path, patterns: &[String]) -> Result<
         excludes: excludes(patterns)?,
         seen: HashSet::new(),
         visited: 0,
+        max_directory_entries: MAX_DIRECTORY_ENTRIES,
         result: Discovery::default(),
     };
     for input in inputs {
@@ -274,7 +277,8 @@ pub fn discover(inputs: &[PathBuf], root: &Path, patterns: &[String]) -> Result<
         if let Err(e) = result {
             walker.result.errors.push(e);
         }
-        if walker.visited > MAX_VISITED_ENTRIES
+        if walker.result.limit_exceeded
+            || walker.visited > MAX_VISITED_ENTRIES
             || walker.result.errors.len() >= MAX_DISCOVERY_ERRORS
         {
             break;
@@ -298,11 +302,20 @@ mod tests {
     use super::*;
 
     fn walker(visited: usize) -> Walker<'static> {
+        walker_with_directory_limit(Path::new("."), visited, MAX_DIRECTORY_ENTRIES)
+    }
+
+    fn walker_with_directory_limit<'a>(
+        root: &'a Path,
+        visited: usize,
+        max_directory_entries: usize,
+    ) -> Walker<'a> {
         Walker {
-            root: Path::new("."),
+            root,
             excludes: GlobSetBuilder::new().build().unwrap(),
             seen: HashSet::new(),
             visited,
+            max_directory_entries,
             result: Discovery::default(),
         }
     }
@@ -326,6 +339,85 @@ mod tests {
 
         assert!(error.contains("directory traversal resource limit"));
         assert_eq!(state.visited, MAX_VISITED_ENTRIES + 1);
+    }
+
+    #[test]
+    fn visited_entry_limit_stops_before_later_siblings() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path();
+        let before = root.join("a-before.verse");
+        let trigger = root.join("b-trigger.verse");
+        let after = root.join("c-after.verse");
+        for path in [&before, &trigger, &after] {
+            std::fs::write(path, b"A := 1\n").unwrap();
+        }
+
+        let mut state =
+            walker_with_directory_limit(root, MAX_VISITED_ENTRIES - 2, MAX_DIRECTORY_ENTRIES);
+        state
+            .visit(root, true, &mut Vec::new(), 0)
+            .expect("the parent directory itself is within the visited-entry limit");
+
+        assert!(state.result.limit_exceeded);
+        assert_eq!(state.result.paths, vec![before]);
+        assert_eq!(state.result.errors.len(), 1);
+    }
+
+    #[test]
+    fn directory_entry_limit_stops_before_later_siblings() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path();
+        let crowded = root.join("a-crowded");
+        std::fs::create_dir(&crowded).unwrap();
+        for name in ["one.verse", "two.verse", "three.verse"] {
+            std::fs::write(crowded.join(name), b"A := 1\n").unwrap();
+        }
+        let after = root.join("z-after.verse");
+        std::fs::write(&after, b"A := 1\n").unwrap();
+
+        let mut state = walker_with_directory_limit(root, 0, 2);
+        state
+            .visit(root, true, &mut Vec::new(), 0)
+            .expect("the child directory records its own limit error");
+
+        assert!(state.result.limit_exceeded);
+        assert!(state.result.paths.is_empty());
+        assert_eq!(state.result.errors.len(), 1);
+        assert!(state.result.errors[0].contains("directory entry resource limit"));
+        assert!(!state.result.paths.contains(&after));
+    }
+
+    #[test]
+    fn depth_limit_stops_siblings_and_later_inputs() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path();
+        let scan_root = root.join("scan");
+        std::fs::create_dir(&scan_root).unwrap();
+        let before = scan_root.join("a-before.verse");
+        std::fs::write(&before, b"A := 1\n").unwrap();
+
+        let mut too_deep = scan_root.clone();
+        for _ in 0..=MAX_DIRECTORY_DEPTH {
+            too_deep.push("x");
+            std::fs::create_dir(&too_deep).unwrap();
+        }
+        std::fs::write(too_deep.join("deep.verse"), b"A := 1\n").unwrap();
+
+        let after_sibling = scan_root.join("z-after.verse");
+        std::fs::write(&after_sibling, b"A := 1\n").unwrap();
+        let later_input = root.join("zz-later.verse");
+        std::fs::write(&later_input, b"A := 1\n").unwrap();
+
+        let scan_root = fs::canonicalize(scan_root).unwrap();
+        let before = fs::canonicalize(before).unwrap();
+        let after_sibling = fs::canonicalize(after_sibling).unwrap();
+        let later_input = fs::canonicalize(later_input).unwrap();
+        let result = discover(&[scan_root, later_input.clone()], root, &[]).unwrap();
+
+        assert!(result.limit_exceeded);
+        assert_eq!(result.paths, vec![before]);
+        assert!(!result.paths.contains(&after_sibling));
+        assert!(!result.paths.contains(&later_input));
     }
 
     #[test]
@@ -404,5 +496,28 @@ mod tests {
         // A rejected file is not counted, so the already discovered set stays
         // exactly at the limit.
         assert_eq!(past_limit.result.paths.len(), MAX_SOURCE_FILES);
+    }
+
+    #[test]
+    fn source_count_limit_stops_before_later_siblings() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path();
+        let trigger = root.join("a-trigger.verse");
+        let after = root.join("z-after.verse");
+        std::fs::write(&trigger, b"A := 1\n").unwrap();
+        std::fs::write(&after, b"A := 1\n").unwrap();
+
+        let mut state = walker_with_directory_limit(root, 0, MAX_DIRECTORY_ENTRIES);
+        state.result.paths = (0..MAX_SOURCE_FILES)
+            .map(|index| PathBuf::from(format!("source-{index:05}.verse")))
+            .collect();
+        state
+            .visit(root, true, &mut Vec::new(), 0)
+            .expect("the root records its child limit error");
+
+        assert!(state.result.limit_exceeded);
+        assert_eq!(state.result.paths.len(), MAX_SOURCE_FILES);
+        assert_eq!(state.result.errors.len(), 1);
+        assert!(!state.result.paths.contains(&after));
     }
 }

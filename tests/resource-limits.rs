@@ -286,6 +286,7 @@ fn directory_depth_limit_is_enforced_at_128() {
         "{report}"
     );
 
+    put(root, "z-after.verse", b"Z:=7\n");
     let mut past = root.to_path_buf();
     for _ in 0..MAX_DEPTH_LEVELS {
         past = past.join("y");
@@ -319,6 +320,7 @@ fn directory_depth_limit_is_enforced_at_128() {
         Some("would-format"),
         "{report}"
     );
+    assert_eq!(status(&report, "z-after.verse"), None, "{report}");
     assert_eq!(
         report["executionErrors"][0]["path"],
         serde_json::Value::Null,
@@ -584,6 +586,7 @@ fn source_count_limit_is_enforced_at_10000() {
     assert_eq!(report["summary"]["filesChecked"], MAX_SOURCES, "{report}");
 
     put(root, "zz-extra.verse", b"A:=1\n");
+    put(root, "zzz-later.verse", b"Z:=7\n");
     let before = snapshot(root);
     let out = run(root, &[".", "--write", "--output-format", "json"]);
     let report = assert_refused(&out, "10,001st source");
@@ -596,6 +599,14 @@ fn source_count_limit_is_enforced_at_10000() {
     assert_eq!(report["summary"]["filesChecked"], MAX_SOURCES, "{report}");
     assert_eq!(report["summary"]["filesRefused"], 0, "{report}");
     assert_eq!(status(&report, "source-00000.verse"), Some("would-format"));
+    assert_eq!(status(&report, "zzz-later.verse"), None, "{report}");
+    assert_eq!(
+        String::from_utf8_lossy(&out.stderr)
+            .matches("at most 10000 source files")
+            .count(),
+        1,
+        "{out:?}"
+    );
     assert_eq!(
         report["executionErrors"][0]["path"],
         serde_json::Value::Null,
