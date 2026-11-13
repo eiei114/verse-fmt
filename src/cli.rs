@@ -46,6 +46,9 @@ pub struct Cli {
     /// Explain file exclusions on stderr.
     #[arg(long)]
     pub verbose: bool,
+    /// Print the executed stage order and the full failure chain for each refusal.
+    #[arg(long)]
+    pub explain: bool,
     #[arg(long, value_enum, default_value_t = Color::Auto)]
     pub color: Color,
     /// stdout report format; `json` emits one versioned envelope and no other text.
@@ -74,6 +77,12 @@ impl Cli {
         if self.output_format == OutputFormat::Json && self.show_config {
             return Err(
                 "--output-format json cannot be combined with --show-config; it prints TOML".into(),
+            );
+        }
+        if self.output_format == OutputFormat::Json && self.explain {
+            return Err(
+                "--explain is text only and cannot be combined with --output-format json; the envelope already reports reason.stage and reason.underlying"
+                    .into(),
             );
         }
         if self.paths.is_empty() && !self.show_config {

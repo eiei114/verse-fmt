@@ -9,6 +9,12 @@ machine-readable form is [`diagnostics.schema.json`](diagnostics.schema.json)
 Text remains the default. `--output-format text` is byte-identical to omitting
 the flag, for stdout, stderr and exit code alike.
 
+Text diagnostics for a refusal now end with a stable stage marker, `[stage=…]`,
+and a guard refusal also carries `[class=guard]` plus one `[class=parse]` line
+for the underlying parse error. `--explain` adds the executed stage order and
+the complete failure chain; without it the diagnostic stays concise and keeps
+its previous wording. See [CLI](cli.md#stage-markers-and---explain).
+
 ## Envelope
 
 ```json
@@ -36,6 +42,25 @@ the flag, for stdout, stderr and exit code alike.
         "stage": "lexer",
         "message": "1:1: unterminated block comment",
         "offset": 0
+      }
+    },
+    {
+      "path": "src/guarded.verse",
+      "status": "refused",
+      "reason": {
+        "stage": "parser",
+        "class": "guard",
+        "message": "1:35: ambiguous adjacent top-level statements; inline binary function bodies are unsupported by the pinned grammar",
+        "offset": 34,
+        "underlying": [
+          {
+            "stage": "parser",
+            "class": "parse",
+            "offset": 49,
+            "nodeKind": "ERROR",
+            "message": "underlying parse error: ERROR node at byte 49; unsupported or incomplete Verse syntax"
+          }
+        ]
       }
     }
   ],
@@ -106,26 +131,60 @@ way the linter reports post-fix diagnostics. Successfully written files are
 | `stage` | The pipeline stage that produced this status. |
 | `message` | The diagnostic without the path prefix. For a positioned failure it starts with `line:column: `. |
 | `offset` | Byte offset in the analyzed source, present when the failure has a known position. |
+| `class` | Optional. Present only where one stage has two distinguishable origins: `guard` for the adjacent-structure refusal, `parse` for a raw CST `ERROR`/`MISSING` finding. Both are `stage: "parser"`. |
+| `underlying` | Optional array. Failures recorded *after* the primary one that stopped processing. Only a guard refusal carries entries today. |
 
 `reason.stage` uses a fixed vocabulary. Only stages this binary can actually
-distinguish are populated; the rest are reserved so the field never has to be
-reinterpreted later.
+populate are listed as populated; the rest are reserved so the field never has
+to be reinterpreted later.
 
 | Stage | Produced by | Populated today |
 |---|---|---|
-| `discovery` | Path guards, ignore/exclude evaluation, configuration resolution | No — reserved |
+| `discovery` | Path guards, ignore/exclude evaluation, configuration resolution | As an `executionErrors` entry, never as a `refused` file — discovery fails before a source exists |
 | `source` | Size, UTF-8, NUL, bare-CR and read/decode failures | Yes |
 | `lexer` | Token scanner: unterminated or nested comment/string, unbalanced delimiters, character-literal, token and nesting limits | Yes |
-| `parser` | Tree-sitter parse: ERROR/MISSING nodes, parse budget, ambiguous adjacent statements, lexical/CST block-comment disagreement | Yes |
+| `parser` | Tree-sitter parse: ERROR/MISSING nodes, parse budget, ambiguous adjacent statements, lexical/CST block-comment disagreement | Yes — also the `class` split described below |
 | `structure` | Indentation analysis: tab indentation, unsupported continuation, inconsistent dedent, nesting depth | Yes |
 | `layout` | Layout emission and the difference between source and output | Yes — also the `reason` of a `would-format`/`formatted` entry |
 | `validation` | Post-format token/structure/idempotence checks | Defensive guard; no known input reaches it |
-| `write` | Write preflight, staging and replacement | Reserved — a write failure is an `executionErrors` entry, not a refused file |
+| `write` | Write preflight, staging and replacement | As an `executionErrors` entry, never as a refused file |
 | `reporting` | Emitting human or machine output | No — reserved |
 
+The text path names these stages even where the machine report has no `files`
+entry for them: a discovery, read or write failure prints a `[stage=…]` marker on
+stderr, and the machine copy stays a `path`/`message` `executionErrors` entry.
+`reporting` is the one stage that only ever appears on stderr, when writing the
+envelope itself fails.
+
 A content change is attributed to `layout` because that is the stage that
-decided the bytes differ. This slice reports the stages the current pipeline can
-distinguish; it does not split `parser` into narrower stages.
+decided the bytes differ.
+
+### Primary and secondary failures
+
+A `refused` entry reports the failure that **stopped processing** as its primary
+reason — its `stage`, `class`, `message` and `offset`. Stages that stopped
+running because of it are not reported as if they had run.
+
+`class` exists because `parser` alone conflates two different outcomes, and a
+reader who fixes one would otherwise meet the other afterwards:
+
+- `class: "guard"` — the **adjoining-structure guard** refused the source. It
+  runs before the ERROR/MISSING walk and is the primary refusal for every source
+  it covers. Its message is a guard outcome, not a parse outcome.
+- `class: "parse"` — the bounded CST walk found a raw `ERROR` or `MISSING` node
+  and refused the source. With no guard refusal this is the primary reason.
+
+When the guard refuses a source that also contains a raw parse error, the
+guard stays primary and the parse error is attached as `underlying`: a raw
+`ERROR` is never treated as evidence that the guard is wrong, and a guarded
+source never becomes accepted because the reporting improved. A guard refusal
+with no raw parse error carries no `underlying` entry at all; no secondary
+failure is fabricated.
+
+Every `underlying` entry names its own `stage`, `class`, `offset` and the
+tree-sitter `nodeKind` (`ERROR`, or `MISSING <kind>` for a zero-width node the
+grammar inserted), so a consumer can tell what the source *also* violates
+without parsing the message prose.
 
 ### `executionErrors`
 
@@ -153,6 +212,12 @@ is unchanged, so a machine message is the stderr message with paths relativized.
 Execution errors continue to go to stderr as well. Machine output never replaces
 them: stdout carries the envelope, stderr carries the human diagnostic. Only the
 envelope is machine-stable; the stderr wording is not part of this contract.
+
+The text copy of a refusal carries the `[stage=…]` marker and any
+`[class=…]` marker; the machine `message` does not, so a consumer never has to
+strip a marker. `executionErrors[].message` is therefore the primary diagnostic
+without the path prefix and without the markers, and it deliberately does **not**
+repeat the underlying parse error: that belongs to `files[].reason.underlying`.
 
 ## Paths
 
@@ -191,18 +256,25 @@ by itself:
 | `--check`/`--diff` found pending changes | 1 |
 | Any refusal, discovery/config failure, write failure, or an invalid flag combination | 2 |
 
-`--output-format json` combined with `--diff` or `--show-config` exits 2 with a
-message on stderr and writes nothing to stdout: the diff is human text and
-`--show-config` prints TOML, so neither can be wrapped in the envelope.
+`--output-format json` combined with `--diff`, `--show-config` or `--explain`
+exits 2 with a message on stderr and writes nothing to stdout: the diff is human
+text, `--show-config` prints TOML, and `--explain` is a human failure chain the
+envelope already carries as `reason.stage`, `reason.class` and
+`reason.underlying`.
 
 ## Stability
 
 Within `schemaVersion: 1`:
 
 - existing properties keep their names, types and meanings;
-- existing `status` and `stage` values are never removed or repurposed;
+- existing `status`, `stage` and `class` values are never removed or
+  repurposed;
 - new optional properties and new enum values may be added;
 - the envelope stays a single object on stdout.
+
+`class` and `underlying` were added as optional properties in this version, so a
+consumer that ignores them still reads the same envelope: a guard refusal keeps
+`stage: "parser"` and the `refused` status it always had.
 
 A breaking change — removing or renaming a property, changing a type, changing
 what `complete` or an existing `status` means — increments `schemaVersion`.

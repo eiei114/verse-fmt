@@ -20,10 +20,18 @@ enabled, Auto disables color for that stream.
 ## Machine-readable output
 
 `--output-format text|json` selects the stdout format. `text` is the default and
-is byte-identical to omitting the flag, for stdout, stderr and exit code.
-`json` writes exactly one versioned object on stdout and no other text; the
-envelope, field meanings, path normalization, ordering and stability promise are
-in [the report contract](report-contract.md) and
+is byte-identical to omitting the flag for stdout, stderr and exit code on the
+success path; every formatter diagnostic that names a stage gained the stable
+`[stage=…]` marker described below: a refusal, and a discovery, source-read,
+write-phase or reporting-envelope failure. Rejecting an invocation happens
+before any stage is known, so usage errors (stdin combined with paths, `--write`
+with stdin, `json` with `--diff`/`--show-config`/`--explain`, no input, a
+directory without a mode), a `--show-config` failure and a failure writing the
+ordinary stdout output (check labels, diff, formatted source) keep their
+unmarked wording. `json` writes exactly one versioned object on stdout and no
+other text;
+the envelope, field meanings, path normalization, ordering and stability promise
+are in [the report contract](report-contract.md) and
 [`diagnostics.schema.json`](diagnostics.schema.json).
 
 ```powershell
@@ -41,8 +49,62 @@ copy keeps the host spelling it has always printed. A write failure is an
 `would-format` plus a failed write never reads as `formatted` or `refused`. Exit
 codes do not change, and `json` never becomes a success signal by itself.
 `--write` with `json` is allowed and reports the post-write state. `json` with
-`--diff` (the diff is human text) or `--show-config` (which prints TOML) exits 2
-with a message and writes nothing to stdout.
+`--diff` (the diff is human text), `--show-config` (which prints TOML) or
+`--explain` (a human failure chain the envelope already carries) exits 2 with a
+message and writes nothing to stdout.
+
+## Stage markers and `--explain`
+
+A refusal reports the stage that stopped processing, in text and in JSON. In the
+text diagnostic the marker is the last element of the line and is stable and
+greppable:
+
+```text
+verse-fmt: device.verse:1:2: unterminated block comment [stage=lexer]
+verse-fmt: device.verse:1:35: ambiguous adjacent top-level statements; inline binary function bodies are unsupported by the pinned grammar [stage=parser] [class=guard]
+device.verse:2:9: underlying parse error: ERROR node at byte 49; unsupported or incomplete Verse syntax [stage=parser] [class=parse]
+```
+
+The `verse-fmt:` prefix belongs to the primary diagnostic only. It is added
+once, around the whole stderr message, so a secondary line that follows it starts
+with the file label instead of repeating the prefix.
+
+The vocabulary is fixed: `discovery`, `source`, `lexer`, `parser`, `structure`,
+`layout`, `validation`, `write`, `reporting`. `[class=…]` appears only where one
+stage has two distinguishable outcomes — `guard` for the adjacent-structure
+refusal, `parse` for a raw CST `ERROR`/`MISSING` finding, both under `parser`.
+The guard is always the primary refusal; a raw parse error underneath it is a
+secondary line that follows it, and a source that fails only the guard gets no
+second line. A refusal's wording is otherwise unchanged, so existing greps on
+`ambiguous adjacent top-level statements` still match.
+
+### `--explain`
+
+`--explain` is text-only. It prints an explanation block per **refused source**:
+the stage order the source actually entered and the complete failure chain,
+after the ordinary concise diagnostic:
+
+```text
+verse-fmt: device.verse:1:35: ambiguous adjacent top-level statements; ... [stage=parser] [class=guard]
+device.verse:2:9: underlying parse error: ERROR node at byte 49; ... [stage=parser] [class=parse]
+verse-fmt explain: device.verse
+  stages: source -> lexer -> parser
+  failure 1 (primary, parser/guard, offset 34): 1:35: ambiguous adjacent top-level statements; ...
+  failure 2 (secondary, parser/parse, ERROR, offset 49): underlying parse error: ERROR node at byte 49; ...
+```
+
+`stages` lists every stage the source entered, in execution order, and always
+ends at the stage that stopped processing. It is not a fixed pipeline diagram:
+a source that reaches `validation` shows the stages `validation` really enters
+to reparse its own output. `--explain` never changes an exit code, never adds
+stdout, and prints nothing for successful runs. A failure that is not
+traceable to one source — a discovery, read or write failure — still gets its
+`[stage=…]` marker but no explanation block, because there is no per-source
+stage order to print.
+
+`--explain` with `--output-format json` is rejected with exit 2 and no stdout:
+the envelope already carries `reason.stage`, `reason.class` and
+`reason.underlying`, so the flag could only duplicate machine data in text.
 
 ## verse.toml (schema 1)
 

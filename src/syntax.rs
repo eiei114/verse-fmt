@@ -8,7 +8,7 @@ use tree_sitter_language::LanguageFn;
 
 use crate::{
     lex::{self, Token},
-    source::{Failure, Source, Stage},
+    source::{Class, Failure, Source, Stage, Trace, Underlying},
 };
 
 unsafe extern "C" {
@@ -25,8 +25,26 @@ pub struct Document {
 }
 
 impl Document {
+    /// Parse without collecting a trace; the crate's own tests use this, the
+    /// binary always needs the trace that `--explain` prints.
+    #[cfg(test)]
     pub fn parse(source: &Source) -> Result<Self, Failure> {
+        Self::parse_traced(source, &mut Trace::default())
+    }
+
+    /// Parse while recording the stages this source actually entered.
+    ///
+    /// The adjacent-structure guard runs before the ERROR/MISSING walk, exactly
+    /// as it always has, so it stays the primary refusal for a source that also
+    /// contains a raw parse error. What changed is only the reporting: the walk
+    /// still runs, and the first raw `ERROR`/`MISSING` node it finds is attached
+    /// to the guard refusal as a secondary, underlying cause. A guard refusal
+    /// never becomes an acceptance, and a raw parse error is never reported as
+    /// evidence that the guard is wrong.
+    pub fn parse_traced(source: &Source, trace: &mut Trace) -> Result<Self, Failure> {
+        trace.enter(Stage::Lexer);
         let tokens = lex::scan(source)?;
+        trace.enter(Stage::Parser);
         // SAFETY: the function is linked from the pinned generated grammar and
         // returns a static TSLanguage with ABI 15, supported by tree-sitter 0.25.
         let language = Language::new(unsafe { LanguageFn::from_raw(tree_sitter_verse) });
@@ -53,6 +71,11 @@ impl Document {
         // The pinned grammar can split an inline function's X+Y into a body X
         // plus a sibling unary +Y without ERROR. Refuse unseparated top-level
         // statements on one physical line instead of trusting that recovery.
+        //
+        // The refusal is recorded rather than returned, so the walk below can
+        // report what else is wrong with the same tree without changing this
+        // guard's decision or its precedence.
+        let mut guard: Option<Failure> = None;
         let mut children = tree.root_node().walk();
         let mut previous: Option<tree_sitter::Node<'_>> = None;
         for node in tree.root_node().named_children(&mut children) {
@@ -69,16 +92,19 @@ impl Document {
                         .take_while(|t| t.range.start < start)
                         .any(|t| t.kind == lex::Kind::Code && t.text(source) == ";");
                     if !separated {
-                        return Err(Failure::new(
-                            Stage::Parser,
+                        guard = Some(Failure::guarded(
                             start,
                             "ambiguous adjacent top-level statements; inline binary function bodies are unsupported by the pinned grammar",
                         ));
+                        break;
                     }
                 }
             }
             previous = Some(node);
         }
+        // A guard refusal never needs the fingerprint, and skipping it keeps a
+        // guard-refused source from being reclassified by a resource limit.
+        let fingerprint = guard.is_none();
         let mut shape = Vec::new();
         let mut spaced_operators = HashSet::new();
         let mut call_openers = HashSet::new();
@@ -131,30 +157,63 @@ impl Document {
                 }
             }
             if node.is_error() || node.is_missing() {
-                return Err(Failure::new(
-                    Stage::Parser,
-                    node.start_byte() + source.body_start(),
-                    "unsupported or incomplete Verse syntax; use UEFN for compiler diagnostics",
-                ));
+                let offset = node.start_byte() + source.body_start();
+                let node_kind = if node.is_missing() {
+                    format!("MISSING {}", node.kind())
+                } else {
+                    node.kind().to_owned()
+                };
+                let Some(primary) = guard.take() else {
+                    return Err(Failure::parse(
+                        offset,
+                        "unsupported or incomplete Verse syntax; use UEFN for compiler diagnostics",
+                    ));
+                };
+                return Err(primary.with_underlying(Underlying {
+                    stage: Stage::Parser,
+                    class: Class::Parse,
+                    offset,
+                    message: format!(
+                        "underlying parse error: {node_kind} node at byte {offset}; unsupported or incomplete Verse syntax",
+                    ),
+                    node_kind,
+                }));
             }
-            if depth > 512 || shape.len() >= 1_000_000 {
+            if depth > 512 {
+                if let Some(primary) = guard.take() {
+                    return Err(primary);
+                }
                 return Err(Failure::new(
                     Stage::Parser,
                     node.start_byte() + source.body_start(),
                     "syntax tree resource limit exceeded",
                 ));
             }
-            shape.push((node.kind_id(), true));
+            if fingerprint {
+                if shape.len() >= 1_000_000 {
+                    return Err(Failure::new(
+                        Stage::Parser,
+                        node.start_byte() + source.body_start(),
+                        "syntax tree resource limit exceeded",
+                    ));
+                }
+                shape.push((node.kind_id(), true));
+            }
             if cursor.goto_first_child() {
                 depth += 1;
                 continue;
             }
             loop {
-                shape.push((cursor.node().kind_id(), false));
+                if fingerprint {
+                    shape.push((cursor.node().kind_id(), false));
+                }
                 if cursor.goto_next_sibling() {
                     break;
                 }
                 if !cursor.goto_parent() {
+                    if let Some(primary) = guard.take() {
+                        return Err(primary);
+                    }
                     if let Some((start, _)) = unmatched_comments.into_iter().min() {
                         return Err(Failure::new(
                             Stage::Parser,
@@ -202,6 +261,109 @@ mod tests {
         let source = Source::from_bytes(text.as_bytes()).unwrap();
         let document = Document::parse(&source).unwrap();
         (source, document)
+    }
+
+    #[test]
+    fn the_guard_stays_primary_and_the_raw_parse_error_is_secondary() {
+        // A self-authored shape: an inline top-level binary function body (the
+        // guard's own reason) plus markup the base grammar refuses, so the same
+        // tree carries a raw ERROR. Before this slice only the guard message
+        // was reported and the parse error surfaced only after a fix.
+        let text = "Add(X:int,Y:int):int = X+Y\nText:=<p>Hello</p>\n";
+        let source = Source::from_bytes(text.as_bytes()).unwrap();
+        let failure = Document::parse(&source).unwrap_err();
+        assert_eq!(failure.stage, Stage::Parser);
+        assert_eq!(failure.class, Some(Class::Guard));
+        assert!(
+            failure
+                .message
+                .contains("ambiguous adjacent top-level statements"),
+            "{}",
+            failure.message
+        );
+        assert_eq!(failure.offset, text.find("+Y").unwrap());
+        assert_eq!(failure.underlying.len(), 1, "{failure:?}");
+        let underlying = &failure.underlying[0];
+        assert_eq!(underlying.stage, Stage::Parser);
+        assert_eq!(underlying.class, Class::Parse);
+        assert_eq!(underlying.node_kind, "ERROR");
+        assert_eq!(underlying.offset, text.find("<p>").unwrap());
+        assert!(
+            underlying.message.contains("underlying parse error"),
+            "{}",
+            underlying.message
+        );
+        // The guard stays a refusal: an underlying parse error does not make a
+        // guarded source acceptable.
+        assert!(crate::format::format(&source, &crate::format::Options::default()).is_err());
+    }
+
+    #[test]
+    fn a_missing_node_is_reported_with_its_kind_as_a_secondary_failure() {
+        // An empty import list makes the base grammar insert a zero-width
+        // MISSING identifier, so the secondary report names that kind instead
+        // of pretending every raw finding is an ERROR node.
+        let text = "A := 1 B := 2\nusing { }\n";
+        let source = Source::from_bytes(text.as_bytes()).unwrap();
+        let failure = Document::parse(&source).unwrap_err();
+        assert_eq!(failure.class, Some(Class::Guard));
+        assert_eq!(failure.underlying[0].node_kind, "MISSING identifier");
+        assert_eq!(failure.underlying[0].class, Class::Parse);
+        assert!(
+            failure.underlying[0]
+                .message
+                .contains("MISSING identifier node at byte"),
+            "{}",
+            failure.underlying[0].message
+        );
+    }
+
+    #[test]
+    fn a_guard_refusal_without_a_raw_parse_error_reports_no_secondary_entry() {
+        // The guard alone refuses this: the tree has no ERROR or MISSING node,
+        // so no secondary entry may be fabricated to look like one.
+        for text in [
+            "Add(X:int,Y:int):int = X+Y\n",
+            "A := 1 B := 2\n",
+            "Print(\"a\") Print(\"b\")\n",
+        ] {
+            let source = Source::from_bytes(text.as_bytes()).unwrap();
+            let failure = Document::parse(&source).unwrap_err();
+            assert_eq!(failure.class, Some(Class::Guard), "{text}");
+            assert!(failure.underlying.is_empty(), "{text}: {failure:?}");
+        }
+    }
+
+    #[test]
+    fn a_raw_parse_error_without_the_guard_stays_a_parse_refusal() {
+        let text = "Text:=<p>Hello</p>\n";
+        let source = Source::from_bytes(text.as_bytes()).unwrap();
+        let failure = Document::parse(&source).unwrap_err();
+        assert_eq!(failure.stage, Stage::Parser);
+        assert_eq!(failure.class, Some(Class::Parse));
+        assert!(failure.underlying.is_empty());
+    }
+
+    #[test]
+    fn the_guard_refuses_exactly_the_sources_it_refused_before() {
+        // Pre-slice refusal set: every one of these failed the guard with no
+        // raw parse error. None may become accepted, and none may gain a
+        // fabricated secondary entry.
+        for text in [
+            "Add(X:int,Y:int):int = X+Y\n",
+            "F(X:int):int = X*2\nG(Y:int):int = Y-1\n",
+            "A := 1 B := 2\n",
+        ] {
+            let source = Source::from_bytes(text.as_bytes()).unwrap();
+            let failure = Document::parse(&source).unwrap_err();
+            assert_eq!(failure.class, Some(Class::Guard), "{text}");
+        }
+        // A semicolon-separated pair is not what the guard is about: the base
+        // grammar itself refuses it as a raw parse error, which is exactly why
+        // the guard cannot be judged from the guard message alone.
+        let separated = Source::from_bytes(b"A := 1; B := 2\n").unwrap();
+        let failure = Document::parse(&separated).unwrap_err();
+        assert_eq!(failure.class, Some(Class::Parse));
     }
 
     #[test]

@@ -119,6 +119,50 @@
           "description": "Byte offset in the analyzed source, when the failure has a known position.",
           "type": "integer",
           "minimum": 0
+        },
+        "class": { "$ref": "#/$defs/class" },
+        "underlying": {
+          "description": "Failures recorded after the primary one that stopped processing. Only a guard refusal carries entries today.",
+          "type": "array",
+          "items": { "$ref": "#/$defs/underlying" }
+        }
+      }
+    },
+    "class": {
+      "description": "Origin of a failure within a stage that has more than one. `guard` is the adjacent-structure refusal, `parse` a raw CST ERROR/MISSING finding; both belong to `parser` and must never be conflated.",
+      "type": "string",
+      "enum": ["guard", "parse"]
+    },
+    "underlying": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["stage", "class", "offset", "nodeKind", "message"],
+      "properties": {
+        "stage": {
+          "type": "string",
+          "enum": [
+            "discovery",
+            "source",
+            "lexer",
+            "parser",
+            "structure",
+            "layout",
+            "validation",
+            "write",
+            "reporting"
+          ]
+        },
+        "class": { "$ref": "#/$defs/class" },
+        "offset": { "type": "integer", "minimum": 0 },
+        "nodeKind": {
+          "description": "Tree-sitter node kind: `ERROR`, or `MISSING <kind>` for a zero-width node the grammar had to insert.",
+          "type": "string",
+          "minLength": 1
+        },
+        "message": {
+          "description": "The underlying diagnostic, naming itself as the underlying cause.",
+          "type": "string",
+          "minLength": 1
         }
       }
     },

@@ -27,3 +27,11 @@ and the top-level binary-function ambiguity remain conservatively rejected.
 `src/robustness.rs` uses fixed xorshift seeds (recorded in code), 256 structured
 layout/property cases, 1,024 arbitrary-byte cases, deep/token-dense refusals and
 a one-MiB protected literal. These do not replace an exhaustive fuzzer or UEFN.
+
+`tests/fixtures/diagnostics/` holds four self-authored verses used by
+`tests/diagnostics-stage.rs` to pin the primary/secondary failure rule: an
+inline top-level binary function body, unseparated adjacent top-level statements,
+and each of those combined with markup the base grammar refuses as a raw ERROR.
+They are written for this project from the public shapes in
+`docs/parser-design.md`; no private project corpus path, content or identifier
+was consulted or copied.

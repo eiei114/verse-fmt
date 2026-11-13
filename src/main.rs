@@ -21,7 +21,7 @@ use std::process::ExitCode;
 use clap::Parser;
 
 use json::{ExecutionError, FileReport, Reason, Status};
-use source::{Failure, Stage};
+use source::{Failure, Stage, Trace};
 
 fn main() -> ExitCode {
     let cli = cli::Cli::parse();
@@ -32,6 +32,7 @@ fn main() -> ExitCode {
     }
     let mut machine = Machine::default();
     let result = run(&cli, &mut machine);
+    let explanations = std::mem::take(&mut machine.explain);
     if cli.output_format == cli::OutputFormat::Json {
         // Exactly one object on stdout, and nothing else: a failure still
         // reports the analyzed state instead of dropping the envelope.
@@ -40,7 +41,10 @@ fn main() -> ExitCode {
             .lock()
             .write_all(envelope.encode().as_bytes())
         {
-            diagnostic(color, &error.to_string());
+            diagnostic(
+                color,
+                &format!("{error} [stage={}]", Stage::Reporting.name()),
+            );
             return ExitCode::from(2);
         }
     }
@@ -48,6 +52,11 @@ fn main() -> ExitCode {
         Ok(code) => ExitCode::from(code),
         Err(error) => {
             diagnostic(color, &error);
+            if cli.explain {
+                for explanation in explanations {
+                    eprintln!("{explanation}");
+                }
+            }
             ExitCode::from(2)
         }
     }
@@ -70,6 +79,10 @@ fn diagnostic(color: bool, error: &str) {
 struct Machine {
     files: Vec<FileReport>,
     errors: Vec<ExecutionError>,
+    /// `--explain` blocks, one per refused source, in analysis order. Kept apart
+    /// from `errors` because they are a text-only diagnostic aid and never part
+    /// of the machine envelope.
+    explain: Vec<String>,
     root: Option<PathBuf>,
 }
 
@@ -78,6 +91,7 @@ impl Default for Machine {
         Self {
             files: Vec::new(),
             errors: Vec::new(),
+            explain: Vec::new(),
             // Until the configuration resolves, the working directory is the
             // best available root; a configuration failure is reported against
             // it and can still not leak an absolute path.
@@ -124,9 +138,12 @@ impl Machine {
                 stage: failure.stage,
                 message,
                 offset: Some(failure.offset),
+                class: failure.class,
+                underlying: failure.underlying.clone(),
             }),
         );
         self.error(Some(failure.label.clone()), &failure.message);
+        self.explain.push(self.sanitize(&failure.explanation()));
     }
 
     /// Replace the status already recorded for a path. Paths are unique per
@@ -141,40 +158,124 @@ impl Machine {
 }
 
 /// A refusal for one analyzed source. `text` is the exact stderr fragment the
-/// text path prints today; `message` is the same diagnostic without the path.
+/// text path prints today, plus this slice's stable `[stage=…]` marker; `message`
+/// is the same diagnostic without the path or marker.
 struct FileFailure {
     label: String,
     stage: Stage,
     offset: usize,
+    /// Set only where one stage has two distinguishable origins; `guard` and
+    /// `parse` share `parser` and must not be conflated.
+    class: Option<source::Class>,
+    /// Failures recorded after the primary one, in discovery order.
+    underlying: Vec<source::Underlying>,
+    /// Stage order the source actually entered, ending at the failing stage.
+    stages: Vec<Stage>,
     message: String,
     text: String,
 }
 
 impl FileFailure {
     /// Failure that carries no source position (decode, read, limit or write).
-    fn message(label: &str, stage: Stage, offset: usize, message: String) -> Self {
+    fn message(label: &str, stage: Stage, offset: usize, message: String, trace: &Trace) -> Self {
+        let stages = stages_with(trace, stage);
         Self {
             label: label.to_owned(),
             stage,
             offset,
-            text: format!("{label}: {message}"),
+            class: None,
+            underlying: Vec::new(),
+            stages,
+            text: format!("{label}: {message} [stage={}]", stage.name()),
             message,
         }
     }
 
     /// Failure reported at a line/column, matching the positioned stderr form.
-    fn positioned(label: &str, source: &source::Source, failure: Failure) -> Self {
+    fn positioned(label: &str, source: &source::Source, failure: Failure, trace: &Trace) -> Self {
         let (line, column) = source.position(failure.offset);
         let message = format!("{line}:{column}: {}", failure.message);
+        let class = failure.class;
+        let mut text = format!("{label}:{message} [stage={}]", failure.stage.name());
+        if let Some(class) = class {
+            text.push_str(&format!(" [class={}]", class.name()));
+        }
+        // A guard refusal stays primary; an underlying parse error is reported
+        // next to it, at its own position, with its node kind, so a reader does
+        // not fix a guard symptom and discover a parse error afterwards.
+        for underlying in &failure.underlying {
+            let (line, column) = source.position(underlying.offset);
+            text.push_str(&format!(
+                "\n{label}:{line}:{column}: {} [stage={}] [class={}]",
+                underlying.message,
+                underlying.stage.name(),
+                underlying.class.name()
+            ));
+        }
         Self {
             label: label.to_owned(),
             stage: failure.stage,
             offset: failure.offset,
-            // Byte-identical to the pre-slice text path: no space after the label.
-            text: format!("{label}:{message}"),
+            class,
+            underlying: failure.underlying,
+            stages: stages_with(trace, failure.stage),
+            // Byte-identical to the pre-slice text path apart from the marker:
+            // no space after the label.
+            text,
             message,
         }
     }
+
+    /// The complete failure chain for `--explain`: the stage order that actually
+    /// ran, then every recorded failure with its primary/secondary class.
+    fn explanation(&self) -> String {
+        let mut block = format!(
+            "verse-fmt explain: {}\n  stages: {}",
+            self.label,
+            self.stages
+                .iter()
+                .map(|stage| stage.name())
+                .collect::<Vec<_>>()
+                .join(" -> ")
+        );
+        block.push_str(&format!(
+            "\n  failure 1 (primary, {}/{}, offset {}): {}",
+            self.stage.name(),
+            self.class.map_or("none", |class| class.name()),
+            self.offset,
+            self.message
+        ));
+        for (index, underlying) in self.underlying.iter().enumerate() {
+            block.push_str(&format!(
+                "\n  failure {} (secondary, {}/{}, {}, offset {}): {}",
+                index + 2,
+                underlying.stage.name(),
+                underlying.class.name(),
+                underlying.node_kind,
+                underlying.offset,
+                underlying.message
+            ));
+        }
+        block
+    }
+}
+
+/// The executed stages, ending at the stage that stopped processing. A failure
+/// that happened before any traced stage (a discovery or read failure) reports
+/// just its own stage.
+///
+/// The trace is not monotonic: `validation` re-enters `lexer` and `parser` to
+/// reparse the formatter's own output, so a structure, layout or validation
+/// failure can happen while the trace tail is already `parser`. Only appending a
+/// stage the trace has not reached at all would leave such a trace ending at the
+/// reparse's `parser` instead of the stage that stopped processing, so the
+/// comparison is against the current tail.
+fn stages_with(trace: &Trace, stage: Stage) -> Vec<Stage> {
+    let mut stages = trace.stages().to_vec();
+    if stages.last() != Some(&stage) {
+        stages.push(stage);
+    }
+    stages
 }
 
 /// One successfully analyzed source, before any mode-specific output.
@@ -185,15 +286,23 @@ struct Analyzed {
     different: bool,
 }
 
-fn fail<T>(machine: &mut Machine, path: Option<String>, message: String) -> Result<T, String> {
+fn fail<T>(
+    machine: &mut Machine,
+    stage: Stage,
+    path: Option<String>,
+    message: String,
+) -> Result<T, String> {
     machine.error(path, &message);
-    Err(message)
+    // The text diagnostic names the stage that stopped processing; the machine
+    // copy of the same message stays marker-free so `executionErrors[].message`
+    // keeps its documented shape.
+    Err(format!("{message} [stage={}]", stage.name()))
 }
 
 fn run(cli: &cli::Cli, machine: &mut Machine) -> Result<u8, String> {
     let config = match config::resolve(cli.config.as_deref(), cli.stdin_filepath.as_deref()) {
         Ok(config) => config,
-        Err(error) => return fail(machine, None, error),
+        Err(error) => return fail(machine, Stage::Discovery, None, error),
     };
     machine.set_root(&config.root);
     if cli.show_config {
@@ -224,13 +333,13 @@ fn run(cli: &cli::Cli, machine: &mut Machine) -> Result<u8, String> {
             .transpose()
         {
             Ok(label) => label.unwrap_or_else(|| "<stdin>".into()),
-            Err(error) => return fail(machine, None, error.to_owned()),
+            Err(error) => return fail(machine, Stage::Discovery, None, error.to_owned()),
         };
         let bytes = match read(std::io::stdin()) {
             Ok(bytes) => bytes,
             // A read/limit failure before any byte is analyzed has no file to
             // refuse, and the human diagnostic must stay byte-identical.
-            Err(error) => return fail(machine, None, error),
+            Err(error) => return fail(machine, Stage::Source, None, error),
         };
         match render(
             &label,
@@ -255,7 +364,7 @@ fn run(cli: &cli::Cli, machine: &mut Machine) -> Result<u8, String> {
         let discovered =
             match files::discover(&cli.paths, &config.root, &config.settings.files.exclude) {
                 Ok(discovered) => discovered,
-                Err(error) => return fail(machine, None, error),
+                Err(error) => return fail(machine, Stage::Discovery, None, error),
             };
         if cli.verbose {
             for excluded in &discovered.excluded {
@@ -267,19 +376,30 @@ fn run(cli: &cli::Cli, machine: &mut Machine) -> Result<u8, String> {
             for error in &discovered.errors {
                 machine.error(None, error);
             }
-            return Err(discovered.errors.join("\n"));
+            return Err(discovered
+                .errors
+                .iter()
+                .map(|error| format!("{error} [stage={}]", Stage::Discovery.name()))
+                .collect::<Vec<_>>()
+                .join("\n"));
         }
         let mut total = 0;
-        let mut failures: Vec<FileFailure> = Vec::new();
+        let mut failures: Vec<Box<FileFailure>> = Vec::new();
         for path in discovered.paths {
             let label = match files::label(&path, &config.root) {
                 Ok(label) => label,
-                Err(error) => return fail(machine, None, error),
+                Err(error) => return fail(machine, Stage::Discovery, None, error),
             };
             let snapshot = match write::Snapshot::read(&path) {
                 Ok(snapshot) => snapshot,
                 Err(error) => {
-                    let failure = FileFailure::message(&label, Stage::Source, 0, error);
+                    let failure = Box::new(FileFailure::message(
+                        &label,
+                        Stage::Source,
+                        0,
+                        error,
+                        &Trace::default(),
+                    ));
                     machine.refused(&failure);
                     failures.push(failure);
                     continue;
@@ -287,12 +407,13 @@ fn run(cli: &cli::Cli, machine: &mut Machine) -> Result<u8, String> {
             };
             total += snapshot.bytes.len();
             if total > files::MAX_TOTAL_BYTES {
-                let failure = FileFailure::message(
+                let failure = Box::new(FileFailure::message(
                     &label,
                     Stage::Source,
                     0,
                     "inputs exceed the 64 MiB total limit".into(),
-                );
+                    &Trace::default(),
+                ));
                 machine.refused(&failure);
                 failures.push(failure);
                 break;
@@ -412,11 +533,19 @@ fn commit_all_using(
 
 /// A write failure is a whole-invocation execution error for one known path,
 /// never a refused file: a refusal means the source was analyzed and rejected,
-/// and `docs/report-contract.md` reserves `reason.stage = write` for exactly
-/// this. Statuses already recorded are left alone, so a staged but uncommitted
-/// file stays `would-format` instead of claiming bytes that never landed.
+/// and `docs/report-contract.md` documents `write` as an `executionErrors` stage
+/// for exactly this. Statuses already recorded are left alone, so a staged but
+/// uncommitted file stays `would-format` instead of claiming bytes that never
+/// landed.
 fn write_failure(machine: &mut Machine, label: String, error: &str) -> String {
-    let text = format!("{label}: {error}");
+    // The stage marker is text-only: the machine copy stays the diagnostic
+    // without the path prefix, as `executionErrors[].message` documents. It goes
+    // on the first line so a multi-line batch report stays greppable.
+    let (first, rest) = match error.split_once('\n') {
+        Some((first, rest)) => (first, format!("\n{rest}")),
+        None => (error, String::new()),
+    };
+    let text = format!("{label}: {first} [stage={}]{}", Stage::Write.name(), rest);
     machine.error(Some(label), error);
     text
 }
@@ -431,12 +560,20 @@ fn render(
     label: &str,
     snapshot: write::Snapshot,
     options: &format::Options,
-) -> Result<Analyzed, FileFailure> {
+) -> Result<Analyzed, Box<FileFailure>> {
+    let mut trace = Trace::default();
+    trace.enter(Stage::Source);
     let source = source::Source::from_bytes(&snapshot.bytes).map_err(|failure| {
-        FileFailure::message(label, failure.stage, failure.offset, failure.to_string())
+        Box::new(FileFailure::message(
+            label,
+            failure.stage,
+            failure.offset,
+            failure.to_string(),
+            &trace,
+        ))
     })?;
-    let output = format::format(&source, options)
-        .map_err(|failure| FileFailure::positioned(label, &source, failure))?;
+    let output = format::format_traced(&source, options, &mut trace)
+        .map_err(|failure| Box::new(FileFailure::positioned(label, &source, failure, &trace)))?;
     let different = snapshot.bytes != output.as_bytes();
     Ok(Analyzed {
         label: label.to_owned(),
@@ -520,6 +657,53 @@ mod tests {
         assert_eq!(
             std::fs::read(root.path().join("b.verse")).unwrap(),
             b"B:=2\n"
+        );
+    }
+
+    /// The stage list `--explain` prints must end at the stage that stopped
+    /// processing even when `validation` re-entered `lexer`/`parser` to reparse
+    /// the formatter's own output. Appending only a stage the trace never
+    /// reached would print `... -> parser` for a structure, layout or validation
+    /// failure that happened after the reparse.
+    #[test]
+    fn stages_end_at_the_stage_that_stopped_processing_after_a_validation_reparse() {
+        let mut trace = Trace::default();
+        for stage in [
+            Stage::Source,
+            Stage::Lexer,
+            Stage::Parser,
+            Stage::Structure,
+            Stage::Layout,
+            Stage::Validation,
+            Stage::Lexer,
+            Stage::Parser,
+        ] {
+            trace.enter(stage);
+        }
+        let reentered = trace.stages().to_vec();
+
+        // Stage failures of the second `indent::analyze`, `layout`, and the
+        // preservation/idempotence checks are all already contained in the
+        // trace: each still has to end the printed list.
+        for stage in [Stage::Structure, Stage::Layout, Stage::Validation] {
+            let stages = stages_with(&trace, stage);
+            assert_eq!(&stages[..reentered.len()], &reentered[..], "{stage:?}");
+            assert_eq!(stages.last(), Some(&stage), "{stage:?}");
+            assert_eq!(stages.len(), reentered.len() + 1, "{stage:?}");
+        }
+
+        // A failure in the stage the trace already ends at must not repeat it.
+        assert_eq!(stages_with(&trace, Stage::Parser), reentered);
+        assert_eq!(
+            stages_with(&trace, Stage::Lexer).last(),
+            Some(&Stage::Lexer)
+        );
+
+        // A failure before any traced stage reports just its own stage.
+        let empty = Trace::default();
+        assert_eq!(
+            stages_with(&empty, Stage::Discovery),
+            vec![Stage::Discovery]
         );
     }
 

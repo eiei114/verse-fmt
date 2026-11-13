@@ -303,6 +303,28 @@ fn refusals_map_to_the_stage_that_actually_decided() {
 }
 
 #[test]
+fn the_envelope_validates_when_a_guard_refusal_carries_an_underlying_parse_error() {
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path();
+    // Self-authored: an inline top-level binary function body (what the guard
+    // refuses) plus markup the base grammar rejects (the raw ERROR underneath).
+    put(
+        root,
+        "guard.verse",
+        "Add(Left:int,Right:int):int = Left+Right\nBanner:=<p>Plain text</p>\n",
+    );
+    let out = run(root, &[".", "--check", "--output-format", "json"]);
+    assert_eq!(out.status.code(), Some(2), "{out:?}");
+    // `envelope` validates the bytes against docs/diagnostics.schema.json.
+    let report = envelope(&out);
+    let reason = &report["files"][0]["reason"];
+    assert_eq!(reason["stage"], "parser", "{report}");
+    assert_eq!(reason["class"], "guard", "{report}");
+    assert_eq!(reason["underlying"][0]["class"], "parse", "{report}");
+    assert_eq!(reason["underlying"][0]["nodeKind"], "ERROR", "{report}");
+}
+
+#[test]
 fn discovery_failures_still_emit_an_envelope_with_null_path() {
     let temp = tempfile::tempdir().unwrap();
     let root = temp.path();

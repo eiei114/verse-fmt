@@ -29,6 +29,7 @@ The tool is an unreleased alpha and never replaces the UEFN compiler.
 | Indented object/array construction and anonymous field initializer `{Z := 5}` | Locally supported in tested shape | Self-authored nested-construction regression |
 | Map literal `map{"x" => 1}` | Unsupported by pinned grammar, exit 2 | Expanded corpus and parser probe |
 | Top-level inline binary function body `Add(X:int,Y:int):int = X+Y` | Reject same-line sibling ambiguity; grammar otherwise mis-splits body | Expanded corpus; explicit guard in both tools |
+| Guard refusal that also contains a raw parse ERROR | Guard stays primary; the parse error is reported as a secondary failure with its offset and node kind | `tests/diagnostics-stage.rs`, self-authored fixtures |
 | String beginning with unescaped `#`, e.g. `A := "# text"` | Pinned scanner may misclassify; fails coverage checks, exit 2 | Linter rule investigation; never alter the literal to make it parse |
 | Malformed/unclosed input | Rejected, exit 2 | Recovery, delimiter, quote tests |
 | Mixed LF/CRLF | Preserved exactly in `preserve`; forced conversion follows protected-span policy | Source and CLI tests |
@@ -67,8 +68,11 @@ minimal positive regressions live in `tests/coverage-gaps.rs`.
 Rejection of remaining forms means parser coverage debt,
 not compiler diagnostics.
 Parser recovery can also lose enclosing structure, so an "adjacent top-level"
-error does not prove the original construct really was top-level. No private
-project sources are included in this repository. Broad UEFN-project readiness
+error does not prove the original construct really was top-level. A guard
+refusal that also contains a raw parse ERROR reports both — the guard as the
+primary reason and the parse error as a secondary one — so the guard message is
+never mistaken for the only problem. See [parser design](parser-design.md).
+No private project sources are included in this repository. Broad UEFN-project readiness
 has not been demonstrated.
 
 The bounded P1 extension accepts `for (I := 1..3)` range generators,

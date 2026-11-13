@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 use crate::{
     indent,
     lex::{Kind, Token},
-    source::{Failure, Source, Stage},
+    source::{Failure, Source, Stage, Trace},
     syntax::Document,
 };
 
@@ -22,15 +22,34 @@ pub struct Options {
     pub line_ending: LineEnding,
 }
 
+/// Format without collecting a trace; the crate's own tests use this, the
+/// binary always needs the trace that `--explain` prints.
+#[cfg(test)]
 pub fn format(source: &Source, options: &Options) -> Result<String, Failure> {
-    let before = Document::parse(source)?;
+    format_traced(source, options, &mut Trace::default())
+}
+
+/// Format while recording the stages this source actually entered.
+///
+/// `validation` re-enters the lexer/parser/structure stages to reparse the
+/// output, and the trace records that on purpose: it is the order that really
+/// ran, so `--explain` also shows a validation round trip when one happened.
+pub fn format_traced(
+    source: &Source,
+    options: &Options,
+    trace: &mut Trace,
+) -> Result<String, Failure> {
+    let before = Document::parse_traced(source, trace)?;
+    trace.enter(Stage::Structure);
     let indentation = indent::analyze(source, &before.tokens)?;
+    trace.enter(Stage::Layout);
     let output = layout(source, &before, &indentation, options)?;
+    trace.enter(Stage::Validation);
     // The formatter produced these bytes itself, so a decode failure is a
     // validation failure of our own output, never a `source` input failure.
     let output_source = Source::from_bytes(output.as_bytes())
         .map_err(|e| Failure::new(Stage::Validation, e.offset, e.message))?;
-    let after = Document::parse(&output_source)?;
+    let after = Document::parse_traced(&output_source, trace)?;
     let after_indentation = indent::analyze(&output_source, &after.tokens)?;
     if !before.equivalent(source, &after, &output_source)
         || indentation.signature != after_indentation.signature
