@@ -79,7 +79,9 @@ closed. This is a parser-safety bound, not a Verse language limit.
    expressions as protected spans. Reject unclosed strings/comments/brackets,
    unsupported escapes, `<#>` comments and unsupported lexical forms.
 3. Bound lexical nesting to 256, lexical tokens to 250,000, parse time to two
-   seconds, CST depth to 512 and fingerprint events to 1,000,000.
+   seconds, CST depth to 512 and fingerprint events to 1,000,000. Each bound is
+   pinned by an in-repository test: see
+   [resource limits and their tests](resource-limits.md).
 4. Reject every ERROR or MISSING CST node. Unknown constructs fail with exit 2;
    they are not silently copied and reported as supported.
    Also reject unseparated same-line top-level nodes. Corpus investigation found

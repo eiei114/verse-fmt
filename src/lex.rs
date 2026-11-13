@@ -3,6 +3,9 @@ use std::ops::Range;
 
 use crate::source::{Failure, MAX_NESTING, Source, Stage};
 
+/// Documented lexical token limit from `docs/parser-design.md`.
+pub const MAX_TOKENS: usize = 250_000;
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Kind {
     Bom,
@@ -224,7 +227,7 @@ pub fn scan(source: &Source) -> Result<Vec<Token>, Failure> {
         });
     }
     while i < scanner.bytes.len() {
-        if tokens.len() >= 250_000 {
+        if tokens.len() >= MAX_TOKENS {
             return Err(Failure::new(
                 Stage::Lexer,
                 i,

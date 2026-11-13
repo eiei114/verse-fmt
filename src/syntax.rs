@@ -11,6 +11,38 @@ use crate::{
     source::{Class, Failure, Source, Stage, Trace, Underlying},
 };
 
+/// Documented parser limits from `docs/parser-design.md`. They are named so a
+/// test can assert the enforced value instead of repeating a literal.
+pub const MAX_PARSE_BUDGET: Duration = Duration::from_secs(2);
+pub const MAX_CST_DEPTH: usize = 512;
+pub const MAX_FINGERPRINT_EVENTS: usize = 1_000_000;
+
+/// The budget check as a pure predicate: "has this parse already taken longer
+/// than the documented budget?". Keeping it free of `Instant` makes the
+/// 2-second boundary testable without sleeping, so no test has to depend on
+/// wall-clock timing to prove the rule.
+fn budget_exceeded(elapsed: Duration, budget: Duration) -> bool {
+    elapsed > budget
+}
+
+/// Effective resource limits for one bounded parse.
+#[derive(Clone, Copy, Debug)]
+struct Limits {
+    cst_depth: usize,
+    fingerprint_events: usize,
+    parse_budget: Duration,
+}
+
+impl Default for Limits {
+    fn default() -> Self {
+        Self {
+            cst_depth: MAX_CST_DEPTH,
+            fingerprint_events: MAX_FINGERPRINT_EVENTS,
+            parse_budget: MAX_PARSE_BUDGET,
+        }
+    }
+}
+
 unsafe extern "C" {
     fn tree_sitter_verse() -> *const ();
 }
@@ -42,6 +74,18 @@ impl Document {
     /// never becomes an acceptance, and a raw parse error is never reported as
     /// evidence that the guard is wrong.
     pub fn parse_traced(source: &Source, trace: &mut Trace) -> Result<Self, Failure> {
+        Self::parse_with(source, trace, Limits::default())
+    }
+
+    /// The bounded walk itself, with the limits passed in.
+    ///
+    /// Production always uses [`Limits::default`], i.e. the documented values.
+    /// The parameter exists so a test can prove the boundary of a limit that
+    /// cannot be reached under the 250,000-token cap without generating a
+    /// million-node source, and so the two-second parse budget can be exercised
+    /// without depending on wall-clock timing. Passing the documented value is
+    /// never optional in production: `parse_traced` hard-codes it.
+    fn parse_with(source: &Source, trace: &mut Trace, limits: Limits) -> Result<Self, Failure> {
         trace.enter(Stage::Lexer);
         let tokens = lex::scan(source)?;
         trace.enter(Stage::Parser);
@@ -54,7 +98,8 @@ impl Document {
             .map_err(|e| Failure::new(Stage::Parser, 0, format!("grammar ABI failure: {e}")))?;
         let bytes = &source.text().as_bytes()[source.body_start()..];
         let started = Instant::now();
-        let mut cancel = |_: &tree_sitter::ParseState| started.elapsed() > Duration::from_secs(2);
+        let mut cancel =
+            |_: &tree_sitter::ParseState| budget_exceeded(started.elapsed(), limits.parse_budget);
         let tree = parser
             .parse_with_options(
                 &mut |i, _| bytes.get(i..).unwrap_or_default(),
@@ -179,7 +224,7 @@ impl Document {
                     node_kind,
                 }));
             }
-            if depth > 512 {
+            if depth > limits.cst_depth {
                 if let Some(primary) = guard.take() {
                     return Err(primary);
                 }
@@ -190,7 +235,7 @@ impl Document {
                 ));
             }
             if fingerprint {
-                if shape.len() >= 1_000_000 {
+                if shape.len() >= limits.fingerprint_events {
                     return Err(Failure::new(
                         Stage::Parser,
                         node.start_byte() + source.body_start(),
@@ -501,5 +546,124 @@ mod tests {
             let source = Source::from_bytes(text.as_bytes()).unwrap();
             assert!(Document::parse(&source).is_err(), "{text}");
         }
+    }
+
+    /// The documented parse budget is two seconds, and the budget must not be
+    /// tested with a real clock: a loaded runner may parse a small source in
+    /// under a millisecond or over two seconds. The predicate is exercised
+    /// directly, at the boundary and one nanosecond past it.
+    #[test]
+    fn the_parse_budget_is_two_seconds_and_is_compared_exactly() {
+        assert_eq!(MAX_PARSE_BUDGET, Duration::from_secs(2));
+        assert!(!budget_exceeded(Duration::ZERO, MAX_PARSE_BUDGET));
+        assert!(!budget_exceeded(MAX_PARSE_BUDGET, MAX_PARSE_BUDGET));
+        assert!(budget_exceeded(
+            MAX_PARSE_BUDGET + Duration::from_nanos(1),
+            MAX_PARSE_BUDGET
+        ));
+    }
+
+    /// The CST depth bound is 512. A chain of 510 additions measures depth 512
+    /// and is accepted; 511 additions measure 513 and are refused. The depth
+    /// limit is also injectable, so the seam is exercised at depth 2 vs 3 to
+    /// prove the comparison is `>` against the configured bound.
+    #[test]
+    fn cst_depth_limit_is_512_and_accepts_its_own_boundary() {
+        assert_eq!(MAX_CST_DEPTH, 512);
+        let text = format!("A := 1{}\n", " + 1".repeat(510));
+        let source = Source::from_bytes(text.as_bytes()).unwrap();
+        let document = Document::parse(&source).unwrap();
+        assert!(document.shape.len() > 3_000, "{}", document.shape.len());
+
+        let text = format!("A := 1{}\n", " + 1".repeat(511));
+        let source = Source::from_bytes(text.as_bytes()).unwrap();
+        let failure = Document::parse(&source).unwrap_err();
+        assert_eq!(failure.stage, Stage::Parser);
+        assert!(
+            failure
+                .message
+                .contains("syntax tree resource limit exceeded"),
+            "{}",
+            failure.message
+        );
+
+        // The reduced seam: a flat source is shallow, so a bound of 1 must
+        // refuse it while the documented 512 accepts it.
+        let flat = Source::from_bytes(b"A := 1\n").unwrap();
+        assert!(
+            Document::parse_with(
+                &flat,
+                &mut Trace::default(),
+                Limits {
+                    cst_depth: 1,
+                    ..Limits::default()
+                }
+            )
+            .is_err()
+        );
+        assert!(Document::parse(&flat).is_ok());
+    }
+
+    /// The fingerprint-event bound is 1,000,000 node-enter plus node-exit events.
+    /// The 250,000-token cap keeps a real source far under that bound (the
+    /// densest reachable source observes well under 400,000 events), so the
+    /// boundary is proven through the reduced `Limits` seam on the same walk.
+    /// The literal constant is asserted too, so a changed value fails this test
+    /// even if the seam stays green.
+    ///
+    /// Technique: reduced constant behind a private test-visible seam
+    /// (`Limits::fingerprint_events`), because the documented 1,000,000 is not
+    /// reachable within another documented limit.
+    ///
+    /// Observed actual behaviour, reported in the pull request rather than
+    /// changed here: the bound is compared only when a node is **entered**, so
+    /// `shape` can overshoot the configured value by at most the tree depth
+    /// before the refusal fires. With a limit of 7 on `A := 1\n` the walk
+    /// records 10 events and still succeeds; with a limit of 6 — the length
+    /// `shape` has when its last node is entered — the walk refuses.
+    #[test]
+    fn fingerprint_event_limit_is_one_million_and_bounds_the_walk() {
+        assert_eq!(MAX_FINGERPRINT_EVENTS, 1_000_000);
+        let source = Source::from_bytes(b"A := 1\n").unwrap();
+        let events = Document::parse(&source).unwrap().shape.len();
+        assert_eq!(events, 10);
+
+        // The last entry happens when `shape` already holds 6 events, so that is
+        // the smallest limit that refuses this source.
+        let accepted = Document::parse_with(
+            &source,
+            &mut Trace::default(),
+            Limits {
+                fingerprint_events: 7,
+                ..Limits::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(accepted.shape.len(), events);
+
+        let refused = Document::parse_with(
+            &source,
+            &mut Trace::default(),
+            Limits {
+                fingerprint_events: 6,
+                ..Limits::default()
+            },
+        )
+        .unwrap_err();
+        assert_eq!(refused.stage, Stage::Parser);
+        assert!(
+            refused
+                .message
+                .contains("syntax tree resource limit exceeded"),
+            "{}",
+            refused.message
+        );
+
+        // A large source stays under the documented bound: 125,000 lines are
+        // 250,000 tokens, and the observed event count for that shape is far
+        // below 1,000,000.
+        let dense = Source::from_bytes("A\n".repeat(125_000).as_bytes()).unwrap();
+        let document = Document::parse(&dense).unwrap();
+        assert!(document.shape.len() < MAX_FINGERPRINT_EVENTS);
     }
 }

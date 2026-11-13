@@ -140,6 +140,10 @@ Limits: 8 MiB/source, 64 MiB/total input, 10,000 sources, 100,000 visited entrie
 128 directory levels; 256 KiB/config or ignore file; 256 exclude globs, each at
 most 4,096 bytes. Parser/token/depth limits are in [parser design](parser-design.md).
 Limit failures are not silent truncation or successful partial formatting.
+Every one of these has an in-repository test: see
+[resource limits and their tests](resource-limits.md), which names the test for
+each value and records the limits whose documented behaviour differs from what
+this build does.
 
 Prefer file input under Windows PowerShell 5.1: its text pipelines can recode
 UTF-8/BOM or line endings before bytes reach the CLI. The tool cannot recover
