@@ -255,7 +255,11 @@ fn lexical_nesting_limit_is_enforced_at_256() {
 }
 
 /// The directory-depth limit. A source reached after 127 hops sits at level 128
-/// and is discovered; 128 hops put it at level 129 and abort discovery.
+/// and is discovered; 128 hops put it at level 129 and stop the walk.
+///
+/// Past the limit the run still reports the sources discovered before it, which
+/// is the documented partial-completion contract: the limit is an execution
+/// error for the invocation, not a reason to discard an already analyzed file.
 #[test]
 fn directory_depth_limit_is_enforced_at_128() {
     let temp = tempfile::tempdir().unwrap();
@@ -295,12 +299,26 @@ fn directory_depth_limit_is_enforced_at_128() {
         String::from_utf8_lossy(&out.stderr).contains("directory traversal resource limit"),
         "{out:?}"
     );
-    // Discovery runs before any source analysis, so a discovery limit fails the
-    // whole invocation: `complete: false`, nothing analyzed, nothing written.
-    // The acceptance criterion asks for partial completion here; this build does
-    // not implement it and the pull request reports the mismatch instead of
-    // changing the walker's behaviour in a test slice.
-    assert_eq!(report["summary"]["filesChecked"], 0, "{report}");
+    // Partial completion: the walk stopped, so the two sources found before the
+    // limit (the root file and the level-128 file) still report their own result.
+    // The limit stays an invocation-level execution error (`path: null`,
+    // `complete: false`) and any refusal still blocks the write phase, so
+    // nothing is written.
+    assert_eq!(report["summary"]["filesChecked"], 2, "{report}");
+    assert_eq!(report["summary"]["filesRefused"], 0, "{report}");
+    assert_eq!(
+        status(&report, "ok.verse"),
+        Some("would-format"),
+        "{report}"
+    );
+    assert_eq!(
+        status(
+            &report,
+            &format!("{}deep.verse", "x/".repeat(MAX_DEPTH_LEVELS - 1))
+        ),
+        Some("would-format"),
+        "{report}"
+    );
     assert_eq!(
         report["executionErrors"][0]["path"],
         serde_json::Value::Null,
@@ -544,10 +562,10 @@ fn discovery_error_cap_is_enforced_at_100() {
     assert_eq!(snapshot(root), before);
 }
 
-/// The source-count limit: 10,000 sources are analyzed, the 10,001st is a
-/// `discovery` refusal. Like the other discovery limits it aborts before any
-/// analysis, so no file reports its own outcome; that mismatch with the
-/// partial-completion criterion is reported in the pull request.
+/// The source-count limit: 10,000 sources are analyzed, the 10,001st stops the
+/// walk as a `discovery` refusal. The 10,000 already discovered still report
+/// their own result (documented partial completion); the count itself is an
+/// invocation-level execution error, and nothing is written.
 #[test]
 fn source_count_limit_is_enforced_at_10000() {
     let temp = tempfile::tempdir().unwrap();
@@ -573,7 +591,16 @@ fn source_count_limit_is_enforced_at_10000() {
         String::from_utf8_lossy(&out.stderr).contains("at most 10000 source files"),
         "{out:?}"
     );
-    assert_eq!(report["summary"]["filesChecked"], 0, "{report}");
+    // Partial completion: every source discovered before the limit keeps its
+    // own result instead of being thrown away with the refusal.
+    assert_eq!(report["summary"]["filesChecked"], MAX_SOURCES, "{report}");
+    assert_eq!(report["summary"]["filesRefused"], 0, "{report}");
+    assert_eq!(status(&report, "source-00000.verse"), Some("would-format"));
+    assert_eq!(
+        report["executionErrors"][0]["path"],
+        serde_json::Value::Null,
+        "{report}"
+    );
     assert_eq!(snapshot(root), before);
     assert_eq!(
         fs::read(root.join("source-00000.verse")).unwrap(),

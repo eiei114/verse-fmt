@@ -128,6 +128,14 @@ pub struct Discovery {
     pub paths: Vec<PathBuf>,
     pub errors: Vec<String>,
     pub excluded: Vec<String>,
+    /// Set when the walk stopped because a documented resource limit was
+    /// reached rather than because one path was unusable. The distinction
+    /// matters to the caller: a limit leaves `paths` holding every source found
+    /// before the limit, and the documented partial-completion contract says
+    /// those sources still report their own result. A plain discovery error
+    /// (a missing or excluded input) keeps the invocation's previous behaviour
+    /// of analyzing nothing.
+    pub limit_exceeded: bool,
 }
 
 struct Walker<'a> {
@@ -148,6 +156,7 @@ impl Walker<'_> {
     ) -> Result<(), String> {
         self.visited += 1;
         if self.visited > MAX_VISITED_ENTRIES || depth > MAX_DIRECTORY_DEPTH {
+            self.result.limit_exceeded = true;
             return Err("directory traversal resource limit exceeded".into());
         }
         let metadata =
@@ -195,6 +204,7 @@ impl Walker<'_> {
                 .collect::<Result<Vec<_>, _>>()
                 .map_err(|e| format!("{shown}: {e}"))?;
             if entries.len() > MAX_DIRECTORY_ENTRIES {
+                self.result.limit_exceeded = true;
                 return Err("directory entry resource limit exceeded".into());
             }
             entries.sort();
@@ -220,6 +230,7 @@ impl Walker<'_> {
                 same_file::Handle::from_path(path).map_err(|e| format!("{shown}: {e}"))?;
             if !self.seen.contains(&identity) {
                 if self.result.paths.len() >= MAX_SOURCE_FILES {
+                    self.result.limit_exceeded = true;
                     return Err("at most 10000 source files are supported".into());
                 }
                 self.seen.insert(identity);
@@ -273,7 +284,7 @@ pub fn discover(inputs: &[PathBuf], root: &Path, patterns: &[String]) -> Result<
         .result
         .paths
         .sort_by_cached_key(|p| label(p, root).unwrap_or_default());
-    if walker.result.paths.is_empty() {
+    if walker.result.paths.is_empty() && !walker.result.limit_exceeded {
         walker
             .result
             .errors

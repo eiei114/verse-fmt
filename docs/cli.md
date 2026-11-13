@@ -139,7 +139,12 @@ eligible files fail with exit 2.
 Limits: 8 MiB/source, 64 MiB/total input, 10,000 sources, 100,000 visited entries,
 128 directory levels; 256 KiB/config or ignore file; 256 exclude globs, each at
 most 4,096 bytes. Parser/token/depth limits are in [parser design](parser-design.md).
-Limit failures are not silent truncation or successful partial formatting.
+Limit failures are not silent truncation or successful partial formatting. A
+discovery limit (visited entries, directory depth, source count) still fails the
+invocation, but sources discovered before it report their own status instead of
+being discarded; per-source limits keep the other sources' results. Either way
+the limit is an `executionErrors` entry, `complete` is `false`, the exit code is
+2, and nothing is written.
 Every one of these has an in-repository test: see
 [resource limits and their tests](resource-limits.md), which names the test for
 each value and records the limits whose documented behaviour differs from what

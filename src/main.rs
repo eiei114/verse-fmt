@@ -372,16 +372,27 @@ fn run(cli: &cli::Cli, machine: &mut Machine) -> Result<u8, String> {
             }
             eprintln!("{} eligible .verse file(s)", discovered.paths.len());
         }
+        let mut discovery_failures: Vec<String> = Vec::new();
         if !discovered.errors.is_empty() {
             for error in &discovered.errors {
                 machine.error(None, error);
             }
-            return Err(discovered
+            let text = discovered
                 .errors
                 .iter()
                 .map(|error| format!("{error} [stage={}]", Stage::Discovery.name()))
                 .collect::<Vec<_>>()
-                .join("\n"));
+                .join("\n");
+            if !discovered.limit_exceeded {
+                return Err(text);
+            }
+            // A documented limit stops the walk, not the analysis: every source
+            // found before it still reports its own result, which is the
+            // partial-completion contract `docs/resource-limits.md` describes.
+            // The limit itself remains an execution error, and any refusal
+            // below still prevents the write phase, so a limited run writes
+            // nothing.
+            discovery_failures.push(text);
         }
         let mut total = 0;
         let mut failures: Vec<Box<FileFailure>> = Vec::new();
@@ -434,12 +445,10 @@ fn run(cli: &cli::Cli, machine: &mut Machine) -> Result<u8, String> {
                 }
             }
         }
-        if !failures.is_empty() {
-            return Err(failures
-                .iter()
-                .map(|failure| failure.text.as_str())
-                .collect::<Vec<_>>()
-                .join("\n"));
+        if !failures.is_empty() || !discovery_failures.is_empty() {
+            let mut lines = discovery_failures;
+            lines.extend(failures.iter().map(|failure| failure.text.clone()));
+            return Err(lines.join("\n"));
         }
     }
     if cli.write {

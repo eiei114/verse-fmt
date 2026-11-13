@@ -44,20 +44,25 @@ predicate or a reduced constant, and each such test says so in its own comment.
 
 ## Documented vs actual
 
-These are real mismatches between the documented behaviour and what this build
-does. Limits were not changed to make a test pass, and no behaviour was changed in
-this slice:
+These are real differences between the documented behaviour and what this build
+does, or behaviour that a reader would reasonably expect the documented sentence
+to imply. No limit value was changed to make a test pass.
 
-1. **Discovery limits do not do partial completion.** The acceptance contract
-   asks that files already discovered still report their result when a
-   filesystem limit is hit. Discovery runs before any source analysis, so a
-   visited-entry, depth, source-count or directory-entry limit aborts the whole
-   invocation with `filesChecked: 0` and one `path: null` execution error.
-   `tests/resource-limits.rs::directory_depth_limit_is_enforced_at_128` and
-   `::source_count_limit_is_enforced_at_10000` assert the actual behaviour and
-   name it. Per-source limits (8 MiB, token, nesting, CST depth) *do* keep the
-   other sources' results, and the 64 MiB aggregate limit does too — those
-   partial-completion expectations hold.
+1. **Discovery limits now report the sources they already found.** Before this
+   change, a visited-entry, depth, source-count or directory-entry limit aborted
+   the whole invocation with `filesChecked: 0` and one `path: null` execution
+   error, discarding sources that had been discovered. The walk now keeps those
+   sources (the `Discovery::limit_exceeded` flag marks a limit rather than an
+   unusable path), so `tests/resource-limits.rs::directory_depth_limit_is_enforced_at_128`
+   and `::source_count_limit_is_enforced_at_10000` assert that the files found
+   before the limit still report their own status. The limit itself remains an
+   invocation-level execution error (`path: null`, `complete: false`, exit 2),
+   and any recorded refusal still stops the write phase, so a limited run writes
+   nothing. A path-level discovery failure — a missing input, an unusable
+   configuration, too many exclude globs — is unchanged: it still analyzes
+   nothing, because no source order can be established. Per-source limits
+   (8 MiB, token, nesting, CST depth) and the 64 MiB aggregate limit keep the
+   other sources' results and are covered by their own tests.
 2. **256 globs of 4,096 bytes cannot be reached together.** 256 × 4,096 bytes is
    1 MiB of `verse.toml`, which the 256 KiB configuration limit refuses first. The
    two documented limits interact, so the glob count and the glob byte size are
