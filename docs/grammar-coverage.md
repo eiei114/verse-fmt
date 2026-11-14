@@ -28,7 +28,7 @@ remaining work) adds it with recorded build results.
 | `#` line comments | supported; protected through last non-newline byte | Comment EOF and CRLF tests | `line-comment` |
 | String interpolation with nested quoted expressions | supported; entire outer string protected | CLI and lexer nested-string tests | `interpolation` |
 | Unicode in strings/comments | supported; protected, diagnostic scalar columns supported | Unicode position and stdin tests | `unicode-literal` |
-| Braced and dot control bodies | supported; parsed, no style conversion between them | Probe; expand golden coverage before transformations | `control-bodies`, `dot-control-body` |
+| Braced and dot control bodies | supported; parsed, no style conversion between them | `tests/coverage-gaps.rs` golden/idempotence cases for both shapes | `control-bodies`, `dot-control-body` |
 | Tabs | refused (exit 2); structural indentation tabs refused, protected text preserved | Indentation refusal tests; no guessed tab width | `tab-indentation` |
 | Indentation up to 252 scanner levels | supported (exit 0); the deepest indentation whose scanner state still serializes | Scanner boundary probe | `shallow-indentation` |
 | Indentation at 253 scanner levels or deeper | refused (exit 2); 253 levels are the first refused depth, because the scanner's 253-entry stack must fit Tree-sitter's 1024-byte state buffer | Scanner boundary probe | `deep-indentation` |
