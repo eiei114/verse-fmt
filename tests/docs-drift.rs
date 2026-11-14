@@ -427,7 +427,6 @@ fn check_vault_contract(path: &str, text: &str) -> Result<(), String> {
     let claims = vault_claims(text, INPUT_KEYS);
     for key in INPUT_KEYS {
         let expected = constant(key).unwrap();
-        let renderings = renderings(expected);
         let Some(claim) = claims.get(*key) else {
             return Err(format!(
                 "{path} never names the `{key}` limit; this guard looks for {:?}. State the \
@@ -436,19 +435,81 @@ fn check_vault_contract(path: &str, text: &str) -> Result<(), String> {
                 vault_namings(key)
             ));
         };
-        if !renderings.iter().any(|rendering| claim.contains(rendering)) {
+        let found = quantities(claim);
+        if !found.contains(&expected) {
             return Err(format!(
-                "{path} states `{key}` as {claim:?}, which does not contain {expected} in any \
-                 of {renderings:?}; src/documented_limits.rs holds {expected}"
+                "{path} states `{key}` as {claim:?}, which holds {found:?} instead of \
+                 {expected} (acceptable wording: {:?}); src/documented_limits.rs holds \
+                 {expected}",
+                renderings(expected)
             ));
         }
     }
     Ok(())
 }
 
+/// Every numeric quantity in a claim, read as a value and its unit. A claim
+/// states a limit only when one of these equals the constant exactly, so `1256`
+/// cannot satisfy 256 and `128 MiB` cannot satisfy 8 MiB, the two ways a plain
+/// substring search still passed a wrong document. An unknown unit — `256`
+/// followed by a word this guard does not know — is dropped rather than guessed,
+/// because guessing a unit is how a wrong value slips through.
+fn quantities(text: &str) -> Vec<Value> {
+    let chars: Vec<char> = text.chars().collect();
+    let mut out = Vec::new();
+    let mut index = 0;
+    while index < chars.len() {
+        if !chars[index].is_ascii_digit() {
+            index += 1;
+            continue;
+        }
+        let start = index;
+        while index < chars.len() && (chars[index].is_ascii_digit() || chars[index] == ',') {
+            index += 1;
+        }
+        let digits: String = chars[start..index]
+            .iter()
+            .filter(|ch| ch.is_ascii_digit())
+            .collect();
+        let mut after = index;
+        while after < chars.len() && chars[after].is_whitespace() {
+            after += 1;
+        }
+        let mut unit_end = after;
+        while unit_end < chars.len() && chars[unit_end].is_ascii_alphanumeric() {
+            unit_end += 1;
+        }
+        let unit: String = chars[after..unit_end].iter().collect();
+        let Ok(number) = digits.parse::<usize>() else {
+            continue;
+        };
+        let value = match unit.as_str() {
+            "MiB" => Some(Value::Bytes(number.saturating_mul(MIB))),
+            "KiB" => Some(Value::Bytes(number.saturating_mul(KIB))),
+            "bytes" | "byte" => Some(Value::Bytes(number)),
+            "seconds" | "second" => Some(Value::Seconds(number as u64)),
+            _ if unit.is_empty() => match chars.get(after) {
+                // A Japanese counter or a line/sentence boundary ends the quantity;
+                // an ASCII letter would start an unknown unit, which is dropped.
+                Some('秒') => Some(Value::Seconds(number as u64)),
+                Some(ch) if !ch.is_ascii_alphanumeric() => Some(Value::Count(number)),
+                Some(_) => None,
+                None => Some(Value::Count(number)),
+            },
+            _ => None,
+        };
+        if let Some(value) = value {
+            out.push(value);
+        }
+        index = unit_end.max(index);
+    }
+    out
+}
+
 /// The vault is not in this repository, so its live check cannot run in CI: the
-/// scoping itself is pinned here. A value belonging to another limit must not
-/// satisfy a claim, and the documented value in the same document must still pass.
+/// attribution and the quantity comparison are pinned here. A value belonging to
+/// another limit must not satisfy a claim, a larger number must not satisfy a
+/// smaller one, and the documented values in the same document must still pass.
 #[test]
 fn a_vault_value_cannot_satisfy_another_limits_claim() {
     let headline = |nesting: u32| {
@@ -464,16 +525,27 @@ fn a_vault_value_cannot_satisfy_another_limits_claim() {
     assert!(error.contains("`nesting`"), "{error}");
     check_vault_contract("synthetic-contract.md", &headline(256))
         .expect("the documented nesting value must pass in the same document");
-    // The scoping also holds in the other direction: a wrong value in a claim
+    // The attribution also holds in the other direction: a wrong value in a claim
     // whose name still matches must fail even when another claim holds the right
     // number, so the config size cannot hide behind the glob count's `256`.
     let misplaced = headline(256).replace(
         "`verse.toml` / 各`.gitignore` 256 KiB",
         "`verse.toml` / 各`.gitignore` 128 KiB",
     );
+    assert_ne!(misplaced, headline(256), "the fixture wording moved");
     let error = check_vault_contract("synthetic-contract.md", &misplaced)
         .expect_err("a 128 KiB config claim must not pass because the glob count reads 256");
     assert!(error.contains("`config-bytes`"), "{error}");
+    // A quantity is compared, not matched as a substring: `1256` must not satisfy
+    // 256, and a 128 MiB source must not satisfy 8 MiB.
+    let error = check_vault_contract("synthetic-contract.md", &headline(1256))
+        .expect_err("nesting 1256 contains `256` but is not 256 levels");
+    assert!(error.contains("`nesting`"), "{error}");
+    let oversized = headline(256).replace("1ファイル8 MiB", "1ファイル128 MiB");
+    assert_ne!(oversized, headline(256), "the fixture wording moved");
+    let error = check_vault_contract("synthetic-contract.md", &oversized)
+        .expect_err("a `128 MiB` source limit contains `8 MiB` but is not 8 MiB");
+    assert!(error.contains("`source-bytes`"), "{error}");
 }
 
 /// Every way a document may reasonably write this value.
