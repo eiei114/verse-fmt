@@ -384,6 +384,72 @@ fn directory_depth_limit_is_enforced_at_128() {
     assert_eq!(fs::read(root.join("ok.verse")).unwrap(), b"A:=1\n");
 }
 
+/// A path-level discovery failure and a discovery resource limit in the same
+/// invocation: the limit governs the analysis. `docs/resource-limits.md` item 1
+/// used to say a path-level failure "analyzes nothing" with no qualification,
+/// which is only true while no limit fired. Here `missing.verse` precedes a
+/// directory whose depth limit is exceeded, so the missing explicit input is
+/// reported on its own and the source found before the limit is still analyzed.
+#[test]
+fn a_path_error_alongside_a_discovery_limit_still_analyzes_the_rest() {
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path();
+    put(root, "a.verse", b"A:=1\n");
+    let mut too_deep = root.to_path_buf();
+    for _ in 0..MAX_DEPTH_LEVELS {
+        too_deep = too_deep.join("y");
+        fs::create_dir(&too_deep).unwrap();
+    }
+    fs::write(too_deep.join("deep.verse"), b"D:=9\n").unwrap();
+
+    let before = snapshot(root);
+    let out = run(
+        root,
+        &["missing.verse", ".", "--write", "--output-format", "json"],
+    );
+    let report = assert_refused(&out, "a missing input beside a depth limit");
+    // The path-level failure keeps its own invocation-level entry...
+    assert_eq!(
+        report["executionErrors"].as_array().unwrap().len(),
+        2,
+        "{report}"
+    );
+    assert!(
+        String::from_utf8_lossy(&out.stderr).contains("directory traversal resource limit"),
+        "{out:?}"
+    );
+    // ...and the limit still lets the source found before it report a status,
+    // which is the shape an unqualified "analyzes nothing" denied.
+    assert_eq!(report["summary"]["filesChecked"], 1, "{report}");
+    assert_eq!(status(&report, "a.verse"), Some("would-format"), "{report}");
+    assert_eq!(status(&report, "missing.verse"), None, "{report}");
+    assert_eq!(snapshot(root), before);
+    assert_eq!(fs::read(root.join("a.verse")).unwrap(), b"A:=1\n");
+
+    // Input order decides which failure is reported at all: with the directory
+    // first the walk stops at the limit before it visits the later explicit
+    // input, so only the limit appears in `executionErrors`.
+    let out = run(
+        root,
+        &[".", "missing.verse", "--check", "--output-format", "json"],
+    );
+    let report = assert_refused(&out, "a depth limit before a missing input");
+    assert_eq!(
+        report["executionErrors"].as_array().unwrap().len(),
+        1,
+        "{report}"
+    );
+    assert!(
+        report["executionErrors"][0]["message"]
+            .as_str()
+            .unwrap()
+            .contains("directory traversal resource limit"),
+        "{report}"
+    );
+    assert_eq!(report["summary"]["filesChecked"], 1, "{report}");
+    assert_eq!(status(&report, "a.verse"), Some("would-format"), "{report}");
+}
+
 /// The configuration byte limit: a 256 KiB `verse.toml` resolves, one byte more
 /// is a `discovery` refusal and no file is written.
 #[test]

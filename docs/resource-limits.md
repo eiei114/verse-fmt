@@ -19,7 +19,8 @@ in a follow-up slice compares the documented sentence against those constants.
 | 64 MiB total input | `tests/resource-limits.rs::total_input_limit_is_enforced_at_sixty_four_mib`, `tests/resource-limits.rs::a_source_ordered_after_the_total_input_limit_is_not_reported` | Eight real 8 MiB files, then one extra byte; a further eligible source sorted after the crossing file has no status |
 | nesting 256 | `tests/resource-limits.rs::lexical_nesting_limit_is_enforced_at_256` | 256 nested `(`, then 257 |
 | 10,000 sources | `tests/resource-limits.rs::source_count_limit_is_enforced_at_10000` | 10,000 real files, then 10,001 |
-| 100,000 visited entries | `src/files.rs::the_last_permitted_visited_entry_and_depth_are_accepted`, `src/files.rs::visited_entry_limit_fails_before_accessing_another_path` | Walker counter injected; no 100,000 entries on disk |
+| 100,000 visited entries | `src/files.rs::the_last_permitted_visited_entry_and_depth_are_accepted`, `src/files.rs::visited_entry_limit_fails_before_accessing_another_path`, `src/files.rs::visited_entry_limit_stops_before_later_siblings` | Walker counter injected; no 100,000 entries on disk |
+| 100,000 per-directory entries | `src/files.rs::directory_entry_limit_stops_before_later_siblings` | Directory limit injected as a 2-entry cap on a real directory; no 100,000 entries on disk |
 | directory depth 128 | `tests/resource-limits.rs::directory_depth_limit_is_enforced_at_128` | 127 hops, then 128 hops |
 | 256 KiB `verse.toml` | `tests/resource-limits.rs::config_byte_limit_is_enforced_at_256_kib` | Real 256 KiB file, then one byte more |
 | 256 KiB `.gitignore` | `tests/resource-limits.rs::gitignore_byte_limit_is_enforced_at_256_kib` | Real 256 KiB file, then one byte more |
@@ -60,8 +61,16 @@ to imply. No limit value was changed to make a test pass.
    remains an invocation-level execution error (`path: null`, `complete: false`,
    exit 2), and any recorded refusal still stops the write phase, so a limited
    run writes nothing. A path-level discovery failure — a missing input, an
-   unusable configuration, too many exclude globs — is unchanged: it still
-   analyzes nothing. Per-source limits (8 MiB, token, nesting, CST depth) keep
+   unusable configuration, too many exclude globs — analyzes nothing on its own:
+   while `Discovery::limit_exceeded` is false `src/main.rs` returns before
+   analysis, so `files` stays empty. When a path-level failure and a limit occur
+   in the same run the limit governs: sources found before it are still analyzed
+   and report their own status, and the path-level failure remains its own
+   `path: null` entry in `executionErrors`. Input order decides which of the two
+   failures is reported at all, because the walk stops at the limit before it
+   reaches a later explicit input.
+   `tests/resource-limits.rs::a_path_error_alongside_a_discovery_limit_still_analyzes_the_rest`
+   pins both orders. Per-source limits (8 MiB, token, nesting, CST depth) keep
    the other sources' results. The 64 MiB aggregate limit stops analysis, so it
    keeps only the sources analyzed before the crossing source: the crossing file
    itself is a `source` refusal, and a source ordered after it is never read, so
@@ -94,6 +103,8 @@ to imply. No limit value was changed to make a test pass.
    refuses a single directory with more than 100,000 direct entries
    (`MAX_DIRECTORY_ENTRIES`, "directory entry resource limit exceeded"). The
    contract sentence names a 100,000 *visited entry* limit across the walk, not a
-   per-directory one. It has no test here because creating 100,000 real entries in
-   one directory is not a cheap fixture; it is listed so the drift guard can
-   record it as documented-vs-actual rather than silently treating it as covered.
+   per-directory one. `src/files.rs::directory_entry_limit_stops_before_later_siblings`
+   proves the boundary through the injected directory limit — a 2-entry cap on a
+   real directory, so no 100,000 real entries are created — and it is listed in
+   the table above. It stays in this section because the contract sentence does
+   not name a per-directory cap, not because it is untested.
