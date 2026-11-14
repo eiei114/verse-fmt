@@ -118,7 +118,12 @@ work.
 
 A source that fails discovery or cannot be read is not silently dropped: it is
 reported as `refused` when the failure is attributable to one path, and appears
-only in `executionErrors` (with `path: null`) when it is not.
+only in `executionErrors` (with `path: null`) when it is not. A discovery *limit*
+(visited entries, directory depth, source count, per-directory entries) also
+produces a `path: null` execution error, but the sources discovered before the
+limit still appear in `files` with their own status — `filesChecked` counts them
+even though `complete` is `false` and the exit code is 2. See
+[resource limits](resource-limits.md).
 
 `--write --output-format json` is allowed and reports the post-write state, the
 way the linter reports post-fix diagnostics. Successfully written files are
