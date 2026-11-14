@@ -2,10 +2,16 @@
 //! configuration. Callers keep their own diagnostics; this module owns the
 //! off-by-one behaviour, so a limit can never silently return a truncated
 //! buffer that later looks like a short but valid input.
+//!
+//! The documented limit literals live in [`documented_limits`], which
+//! `tests/docs-drift.rs` reads directly; this module owns the enforcement
+//! helper and re-exports the values for the rest of the binary.
 use std::io::{self, Read};
 
-/// Largest accepted `.verse.toml` or ignore file.
-pub const CONFIG_BYTES: usize = 256 * 1024;
+#[path = "documented_limits.rs"]
+pub mod documented_limits;
+
+pub use documented_limits::*;
 
 /// Read at most `limit` bytes.
 ///

@@ -1,0 +1,11 @@
+{
+  "schemaVersion": 1,
+  "contractVersion": 1,
+  "formatterDoc": "docs/cli.md",
+  "linterRepository": "eiei114/verse-lint",
+  "linterDoc": "docs/cli.md",
+  "linterContractVersion": 1,
+  "linterObservedCommit": "7bd9b230c04882c5de25c6151f3e4b4b8062e276",
+  "observedAt": "2026-11-14",
+  "note": "The shared toolchain contract version is one number for both repositories. This file records the value the sibling linter asserts; set VERSE_LINT_DOC to its docs/cli.md to re-read it live instead of trusting the record."
+}

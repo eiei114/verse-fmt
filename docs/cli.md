@@ -136,9 +136,22 @@ linked ancestors) are errors. Files are identity-deduplicated and sorted by
 relative forward-slash labels. Missing paths, shell-unexpanded globs and zero
 eligible files fail with exit 2.
 
-Limits: 8 MiB/source, 64 MiB/total input, 10,000 sources, 100,000 visited entries,
-128 directory levels; 256 KiB/config or ignore file; 256 exclude globs, each at
-most 4,096 bytes. Parser/token/depth limits are in [parser design](parser-design.md).
+Limits, each stated as a machine-checked pair. `tests/docs-drift.rs` parses
+`` `key = value` `` below and compares it with `src/documented_limits.rs`, so a
+sentence and a constant cannot drift apart silently:
+
+- `source-bytes = 8 MiB`: one source file
+- `total-bytes = 64 MiB`: all input in one invocation
+- `nesting = 256`: lexical/bracket nesting inside a source
+- `sources = 10,000`: sources analyzed per invocation
+- `visited-entries = 100,000`: filesystem entries the walk visits
+- `directory-depth = 128`: directory levels from the config root
+- `config-bytes = 256 KiB`: `verse.toml` and each ignore file
+- `exclude-globs = 256`: configured exclude patterns
+- `exclude-glob-bytes = 4,096 bytes`: length of one exclude pattern
+
+Parser/token/depth limits are in [parser design](parser-design.md), stated the
+same way.
 Limit failures are not silent truncation or successful partial formatting. A
 discovery limit (visited entries, directory depth, source count, or the
 per-directory entry cap recorded in [resource limits](resource-limits.md)) stops

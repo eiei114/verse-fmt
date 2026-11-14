@@ -9,19 +9,13 @@ use ignore::gitignore::{Gitignore, GitignoreBuilder};
 
 use crate::limits;
 
-pub const MAX_TOTAL_BYTES: usize = 64 * 1024 * 1024;
-
-/// Documented discovery limits. They are named here so a test can assert the
-/// boundary that the walk actually enforces instead of repeating a literal.
-pub const MAX_VISITED_ENTRIES: usize = 100_000;
-pub const MAX_DIRECTORY_DEPTH: usize = 128;
-pub const MAX_DIRECTORY_ENTRIES: usize = 100_000;
-pub const MAX_SOURCE_FILES: usize = 10_000;
-/// Collected discovery diagnostics per invocation; past this, the walk stops
-/// reporting more so the report stays bounded.
-pub const MAX_DISCOVERY_ERRORS: usize = 100;
-pub const MAX_EXCLUDE_GLOBS: usize = 256;
-pub const MAX_EXCLUDE_GLOB_BYTES: usize = 4_096;
+/// Documented discovery limits, defined in [`crate::limits`] so a test can
+/// assert the boundary that the walk actually enforces instead of repeating a
+/// literal.
+pub use crate::limits::{
+    MAX_DIRECTORY_DEPTH, MAX_DIRECTORY_ENTRIES, MAX_DISCOVERY_ERRORS, MAX_EXCLUDE_GLOB_BYTES,
+    MAX_EXCLUDE_GLOBS, MAX_SOURCE_FILES, MAX_TOTAL_BYTES, MAX_VISITED_ENTRIES,
+};
 
 pub fn excludes(patterns: &[String]) -> Result<GlobSet, String> {
     if patterns.len() > MAX_EXCLUDE_GLOBS {

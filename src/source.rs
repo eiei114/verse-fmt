@@ -1,7 +1,6 @@
 use std::fmt;
 
-pub const MAX_SOURCE_BYTES: usize = 8 * 1024 * 1024;
-pub const MAX_NESTING: usize = 256;
+pub use crate::limits::{MAX_NESTING, MAX_SOURCE_BYTES};
 
 /// Failure stage vocabulary. Each variant names a pipeline phase this binary
 /// can actually distinguish; the names are the wire values of

@@ -7,9 +7,33 @@ but not in the suite, so a regression would have gone unnoticed.
 
 The canonical wording is the resource-limit sentence in the maintainer vault's
 `4_Project/OSS/verse-fmt/Docs/windows-toolchain-contract.md`; [`cli.md`](cli.md)
-restates it for this repository. Enforcement lives in `src/limits.rs`,
-`src/files.rs`, `src/source.rs`, `src/lex.rs` and `src/syntax.rs`. The drift guard
-in a follow-up slice compares the documented sentence against those constants.
+restates it for this repository. The literals themselves live in
+`src/documented_limits.rs`, and [`grammar coverage`](grammar-coverage.md) says
+which forms the build accepts.
+
+## Documented values
+
+`tests/docs-drift.rs` parses these `` `key = value` `` pairs from `cli.md`,
+`parser-design.md` and this file and compares each one with the constant in
+`src/documented_limits.rs`. A mismatch fails with the document, the claim and the
+actual value. Set `VERSE_FMT_CONTRACT_DOC` to the vault contract to check its
+wording against the same values.
+
+- `source-bytes = 8 MiB`
+- `total-bytes = 64 MiB`
+- `nesting = 256`
+- `sources = 10,000`
+- `visited-entries = 100,000`
+- `directory-depth = 128`
+- `directory-entries = 100,000`
+- `config-bytes = 256 KiB`
+- `discovery-errors = 100`
+- `exclude-globs = 256`
+- `exclude-glob-bytes = 4,096 bytes`
+- `tokens = 250,000`
+- `parse-budget = 2 seconds`
+- `cst-depth = 512`
+- `fingerprint-events = 1,000,000`
 
 ## Coverage
 
@@ -99,12 +123,21 @@ to imply. No limit value was changed to make a test pass.
    pinned by the tests is therefore "510 chained additions accepted, 511 refused",
    which measures walk depth 512 and 513. Reading the constant as "CST nesting of
    512 nodes" would be wrong.
-6. **A per-directory entry cap exists but is not documented.** `src/files.rs`
-   refuses a single directory with more than 100,000 direct entries
-   (`MAX_DIRECTORY_ENTRIES`, "directory entry resource limit exceeded"). The
-   contract sentence names a 100,000 *visited entry* limit across the walk, not a
-   per-directory one. `src/files.rs::directory_entry_limit_stops_before_later_siblings`
+6. **A per-directory entry cap exists but is not documented in the shared
+   contract sentence.** `src/files.rs` refuses a single directory with more than
+   100,000 direct entries (`MAX_DIRECTORY_ENTRIES`, "directory entry resource
+   limit exceeded"). The contract sentence names a 100,000 *visited entry* limit
+   across the walk, not a per-directory one. This repository states both values
+   above so the drift guard covers the per-directory cap too.
+   `src/files.rs::directory_entry_limit_stops_before_later_siblings`
    proves the boundary through the injected directory limit — a 2-entry cap on a
    real directory, so no 100,000 real entries are created — and it is listed in
-   the table above. It stays in this section because the contract sentence does
-   not name a per-directory cap, not because it is untested.
+   the table above.
+7. **Indentation depth fails closed well before the documented nesting value.**
+   `nesting = 256` bounds lexical/bracket nesting, but the scanner's indentation
+   stack is capped at 253 entries so its serialized state fits Tree-sitter's
+   1024-byte buffer. A 253-level indented source that passes the lexer is still
+   refused by the parser, and a 255-level one by the adjacent-structure guard.
+   `docs/grammar-coverage.md` records this as its own refused row
+   (`deep-indentation`), so the table does not imply that 256 indentation levels
+   are accepted.

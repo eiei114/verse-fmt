@@ -78,10 +78,17 @@ closed. This is a parser-safety bound, not a Verse language limit.
 2. Scan all bytes into lossless tokens. Strings include their interpolated
    expressions as protected spans. Reject unclosed strings/comments/brackets,
    unsupported escapes, `<#>` comments and unsupported lexical forms.
-3. Bound lexical nesting to 256, lexical tokens to 250,000, parse time to two
-   seconds, CST depth to 512 and fingerprint events to 1,000,000. Each bound is
-   pinned by an in-repository test: see
-   [resource limits and their tests](resource-limits.md).
+3. Bound lexical nesting, lexical tokens, parse time, CST depth and fingerprint
+   events to the documented values below. Each bound is pinned by an
+   in-repository test: see [resource limits and their tests](resource-limits.md).
+   `tests/docs-drift.rs` compares these pairs with `src/documented_limits.rs`,
+   so no sentence can drift from its constant silently:
+
+   - `tokens = 250,000`
+   - `parse-budget = 2 seconds`
+   - `cst-depth = 512`
+   - `fingerprint-events = 1,000,000`
+   - `nesting = 256`, the lexical nesting bound shared with the CLI document
 4. Reject every ERROR or MISSING CST node. Unknown constructs fail with exit 2;
    they are not silently copied and reported as supported.
    Also reject unseparated same-line top-level nodes. Corpus investigation found
@@ -154,9 +161,11 @@ license are in `vendor/tree-sitter-verse/upstream.md`. Local probe logs under
 
 ## Expanded corpus
 
-`tests/fixtures/corpus.json` contains 87 self-authored named cases: 64 independent
-golden layouts and 23 refusals (malformed input and known unsupported forms,
-clearly categorized). The corpus test invokes the real CLI and rechecks every
-successful output for idempotence. This is tool coverage, not UEFN acceptance.
+`tests/fixtures/corpus.json` contains 87 self-authored named cases, with
+malformed input and known unsupported forms clearly categorized.
+Corpus counts: 87 cases total, 64 golden and 23 refusal.
+The corpus test invokes the real CLI and rechecks every successful output for
+idempotence, and `tests/docs-drift.rs` fails when any document quotes a different
+count. This is tool coverage, not UEFN acceptance.
 `src/robustness.rs` adds fixed-seed structured and arbitrary-byte checks plus
 bounded resource cases. See fixture provenance for exact counts and seeds.
