@@ -221,6 +221,58 @@ fn total_input_limit_is_enforced_at_sixty_four_mib() {
     assert_eq!(snapshot(root), before);
 }
 
+/// A source sorted after the file that crosses the 64 MiB aggregate limit is
+/// never read: it has no entry in `files`, so it is absent from `filesChecked`
+/// too. This is the documented shape (`docs/cli.md`, `docs/resource-limits.md`):
+/// the aggregate stop keeps only the sources analyzed before the crossing file.
+/// The crossing file sorts before an eligible source here, so unlike the test
+/// above this one exercises a source that is ordered *after* the limit.
+#[test]
+fn a_source_ordered_after_the_total_input_limit_is_not_reported() {
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path();
+    for index in 0..8 {
+        put(
+            root,
+            &format!("file-{index:02}.verse"),
+            &vec![b' '; MAX_SOURCE_BYTES],
+        );
+    }
+    // Two bytes on top of exactly 64 MiB cross the aggregate limit; the label
+    // sorts after the eight 8 MiB sources, so those are all analyzed first.
+    put(root, "m-crossing.verse", b"A\n");
+    // An eligible source that sorts after the crossing file. It must never be
+    // read, analyzed or reported.
+    put(root, "z-later.verse", b"Z:=7\n");
+
+    let before = snapshot(root);
+    let out = run(root, &[".", "--write", "--output-format", "json"]);
+    let report = assert_refused(&out, "64 MiB total input with a later source");
+    assert!(
+        String::from_utf8_lossy(&out.stderr)
+            .contains("m-crossing.verse: inputs exceed the 64 MiB total limit"),
+        "{out:?}"
+    );
+    assert_eq!(status(&report, "m-crossing.verse"), Some("refused"));
+    assert_eq!(reason_stage(&report, "m-crossing.verse"), Some("source"));
+    // The eight sources read before the crossing keep their own result.
+    assert_eq!(report["summary"]["filesChecked"], 9, "{report}");
+    assert_eq!(report["summary"]["filesRefused"], 1, "{report}");
+    // The later source has no status at all: absent from `files` and therefore
+    // not counted by `filesChecked`.
+    assert_eq!(status(&report, "z-later.verse"), None, "{report}");
+    assert!(
+        !report["files"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|file| file["path"] == "z-later.verse"),
+        "{report}"
+    );
+    assert_eq!(snapshot(root), before);
+    assert_eq!(fs::read(root.join("z-later.verse")).unwrap(), b"Z:=7\n");
+}
+
 /// The lexical nesting limit: 256 levels parse, 257 is a `lexer` refusal.
 #[test]
 fn lexical_nesting_limit_is_enforced_at_256() {

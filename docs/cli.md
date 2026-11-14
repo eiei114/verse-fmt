@@ -144,9 +144,13 @@ discovery limit (visited entries, directory depth, source count, or the
 per-directory entry cap recorded in [resource limits](resource-limits.md)) stops
 the walk before the next sibling or explicit input. Sources discovered before
 it report their own status; later files are neither discovered nor analyzed.
-Per-source limits keep the other sources' results. Either way the limit is an
-`executionErrors` entry, `complete` is `false`, the exit code is 2, and nothing
-is written.
+The 64 MiB aggregate input limit stops analysis the same way: once the sources
+read so far exceed 64 MiB, the crossing source is `refused` at stage `source`,
+sources analyzed before it keep their own status, and a source ordered after it
+is never read, so it has no entry at all — absent from `files` and from
+`filesChecked`. Per-source limits keep the other sources' results. Either way
+the limit is an `executionErrors` entry, `complete` is `false`, the exit code is
+2, and nothing is written.
 Every one of these has an in-repository test: see
 [resource limits and their tests](resource-limits.md), which names the test for
 each value and records the limits whose documented behaviour differs from what

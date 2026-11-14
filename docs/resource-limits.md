@@ -16,7 +16,7 @@ in a follow-up slice compares the documented sentence against those constants.
 | Limit | Test | Technique |
 |---|---|---|
 | 8 MiB per source | `tests/resource-limits.rs::source_byte_limit_is_enforced_at_eight_mib` | Real 8 MiB file, then one byte more |
-| 64 MiB total input | `tests/resource-limits.rs::total_input_limit_is_enforced_at_sixty_four_mib` | Eight real 8 MiB files, then one extra byte |
+| 64 MiB total input | `tests/resource-limits.rs::total_input_limit_is_enforced_at_sixty_four_mib`, `tests/resource-limits.rs::a_source_ordered_after_the_total_input_limit_is_not_reported` | Eight real 8 MiB files, then one extra byte; a further eligible source sorted after the crossing file has no status |
 | nesting 256 | `tests/resource-limits.rs::lexical_nesting_limit_is_enforced_at_256` | 256 nested `(`, then 257 |
 | 10,000 sources | `tests/resource-limits.rs::source_count_limit_is_enforced_at_10000` | 10,000 real files, then 10,001 |
 | 100,000 visited entries | `src/files.rs::the_last_permitted_visited_entry_and_depth_are_accepted`, `src/files.rs::visited_entry_limit_fails_before_accessing_another_path` | Walker counter injected; no 100,000 entries on disk |
@@ -61,9 +61,14 @@ to imply. No limit value was changed to make a test pass.
    exit 2), and any recorded refusal still stops the write phase, so a limited
    run writes nothing. A path-level discovery failure — a missing input, an
    unusable configuration, too many exclude globs — is unchanged: it still
-   analyzes nothing. Per-source limits (8 MiB, token, nesting, CST depth) and the
-   64 MiB aggregate limit keep the other sources' results and are covered by
-   their own tests.
+   analyzes nothing. Per-source limits (8 MiB, token, nesting, CST depth) keep
+   the other sources' results. The 64 MiB aggregate limit stops analysis, so it
+   keeps only the sources analyzed before the crossing source: the crossing file
+   itself is a `source` refusal, and a source ordered after it is never read, so
+   it has no status at all — absent from `files` and from `filesChecked`.
+   `tests/resource-limits.rs::total_input_limit_is_enforced_at_sixty_four_mib`
+   and `::a_source_ordered_after_the_total_input_limit_is_not_reported` cover
+   both shapes.
 2. **256 globs of 4,096 bytes cannot be reached together.** 256 × 4,096 bytes is
    1 MiB of `verse.toml`, which the 256 KiB configuration limit refuses first. The
    two documented limits interact, so the glob count and the glob byte size are
