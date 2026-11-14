@@ -332,7 +332,8 @@ fn every_documented_limit_matches_its_constant() {
 /// The shared toolchain contract is human-owned prose in the maintainer vault and
 /// is not part of either repository, so CI cannot read it. Point
 /// `VERSE_FMT_CONTRACT_DOC` at that file to check it too: every canonical value
-/// must appear, and a changed or missing value fails with its name.
+/// must appear in the vault's own claim for that limit, and a changed or missing
+/// value fails with its name.
 #[test]
 fn the_optional_vault_contract_states_the_same_values() {
     let Ok(path) = std::env::var("VERSE_FMT_CONTRACT_DOC") else {
@@ -340,16 +341,139 @@ fn the_optional_vault_contract_states_the_same_values() {
     };
     let text = fs::read_to_string(&path)
         .unwrap_or_else(|error| panic!("cannot read VERSE_FMT_CONTRACT_DOC {path}: {error}"));
+    if let Err(error) = check_vault_contract(&path, &text) {
+        panic!("{error}");
+    }
+}
+
+/// The wording the human-owned vault uses to name each limit it restates. The
+/// vault is prose, not a key/value table, so a value only counts when it sits in a
+/// clause attributed to its own limit: a different limit's value must never
+/// satisfy this key's claim. `nesting 257` next to `config-bytes = 256 KiB` is
+/// exactly the case the whole-document search used to miss. A reworded vault fails
+/// with the key and the wording this guard looked for.
+fn vault_namings(key: &str) -> &'static [&'static str] {
+    match key {
+        "source-bytes" => &["source-bytes", "1ファイル", "per file", "file size"],
+        "total-bytes" => &["total-bytes", "全入力", "total input"],
+        "nesting" => &["nesting"],
+        "sources" => &["sources", "source", "invocation"],
+        "visited-entries" => &["visited-entries", "visited", "entry", "訪問"],
+        "directory-depth" => &["directory-depth", "directory depth", "depth"],
+        "config-bytes" => &["config-bytes", "verse.toml", ".gitignore", "config"],
+        "exclude-globs" => &["exclude-globs", "exclude glob", "globs"],
+        "exclude-glob-bytes" => &["exclude-glob-bytes", "各", "each", "per glob", "glob bytes"],
+        _ => &[],
+    }
+}
+
+fn clause_names_limit(clause: &str, key: &str) -> bool {
+    let clause = clause.to_lowercase();
+    vault_namings(key).iter().any(|naming| {
+        let naming = naming.to_lowercase();
+        clause.contains(naming.as_str())
+    })
+}
+
+/// Split prose into claim-sized pieces at sentence, list-item and line
+/// boundaries. `` `verse.toml` `` keeps its dot: a `.` only ends a clause when
+/// whitespace or the end of the text follows it.
+fn clauses(text: &str) -> Vec<&str> {
+    let mut out = Vec::new();
+    let mut start = 0;
+    for (index, ch) in text.char_indices() {
+        let boundary = match ch {
+            '\n' | '\r' | '。' | '、' | '・' | ';' => true,
+            '.' => text[index + 1..]
+                .chars()
+                .next()
+                .is_none_or(|next| next.is_whitespace()),
+            _ => false,
+        };
+        if boundary {
+            out.push(&text[start..index]);
+            start = index + ch.len_utf8();
+        }
+    }
+    out.push(&text[start..]);
+    out
+}
+
+/// Every clause attributed to the limits it names. A clause that names no limit
+/// keeps the previous attribution, so a value written after its naming — as the
+/// vault's single limit sentence does — still belongs to that limit.
+fn vault_claims(text: &str, keys: &[&str]) -> BTreeMap<String, String> {
+    let mut claims: BTreeMap<String, String> = BTreeMap::new();
+    let mut current: Vec<String> = Vec::new();
+    for clause in clauses(text) {
+        let named: Vec<String> = keys
+            .iter()
+            .filter(|key| clause_names_limit(clause, key))
+            .map(|key| (*key).to_owned())
+            .collect();
+        if !named.is_empty() {
+            current = named;
+        }
+        for key in &current {
+            let claim = claims.entry(key.clone()).or_default();
+            claim.push_str(clause);
+            claim.push('\n');
+        }
+    }
+    claims
+}
+
+fn check_vault_contract(path: &str, text: &str) -> Result<(), String> {
+    let claims = vault_claims(text, INPUT_KEYS);
     for key in INPUT_KEYS {
         let expected = constant(key).unwrap();
         let renderings = renderings(expected);
-        if !renderings.iter().any(|rendering| text.contains(rendering)) {
-            panic!(
-                "{path} does not state `{key} = {expected}` in any of {renderings:?}; \
-                 src/documented_limits.rs holds {expected}"
-            );
+        let Some(claim) = claims.get(*key) else {
+            return Err(format!(
+                "{path} never names the `{key}` limit; this guard looks for {:?}. State the \
+                 limit's name and value in one claim, or teach \
+                 tests/docs-drift.rs::vault_namings the new wording",
+                vault_namings(key)
+            ));
+        };
+        if !renderings.iter().any(|rendering| claim.contains(rendering)) {
+            return Err(format!(
+                "{path} states `{key}` as {claim:?}, which does not contain {expected} in any \
+                 of {renderings:?}; src/documented_limits.rs holds {expected}"
+            ));
         }
     }
+    Ok(())
+}
+
+/// The vault is not in this repository, so its live check cannot run in CI: the
+/// scoping itself is pinned here. A value belonging to another limit must not
+/// satisfy a claim, and the documented value in the same document must still pass.
+#[test]
+fn a_vault_value_cannot_satisfy_another_limits_claim() {
+    let headline = |nesting: u32| {
+        format!(
+            "構文nesting {nesting}。上限は1ファイル8 MiB。全入力64 MiB。\
+             1 invocationあたりsource 10,000件。訪問entry 100,000件。\
+             directory depth 128。`verse.toml` / 各`.gitignore` 256 KiB。\
+             exclude glob 256件・各4,096 bytes。"
+        )
+    };
+    let error = check_vault_contract("synthetic-contract.md", &headline(257))
+        .expect_err("nesting 257 must not pass through the `256 KiB` config-bytes claim");
+    assert!(error.contains("`nesting`"), "{error}");
+    check_vault_contract("synthetic-contract.md", &headline(256))
+        .expect("the documented nesting value must pass in the same document");
+    // The scoping also holds in the other direction: a wrong value in a claim
+    // whose name still matches must fail even when another claim holds the right
+    // number, so the config size cannot hide behind the glob count's `256`.
+    let misplaced = headline(256).replace(
+        "`verse.toml` / 各`.gitignore` 256 KiB",
+        "`verse.toml` / 各`.gitignore` 128 KiB",
+    );
+    let error = check_vault_contract("synthetic-contract.md", &misplaced)
+        .expect_err("a 128 KiB config claim must not pass because the glob count reads 256");
+    assert!(error.contains("`config-bytes`"), "{error}");
 }
 
 /// Every way a document may reasonably write this value.
@@ -529,6 +653,7 @@ impl CoverageCase {
 
 fn generated_fixture(name: &str) -> Vec<u8> {
     match name {
+        "indentation-depth-252" => deep_indentation(252).into_bytes(),
         "indentation-depth-253" => deep_indentation(253).into_bytes(),
         other => panic!(
             "tests/fixtures/coverage.json names generated fixture {other:?}, \

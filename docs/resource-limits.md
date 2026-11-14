@@ -136,8 +136,9 @@ to imply. No limit value was changed to make a test pass.
 7. **Indentation depth fails closed well before the documented nesting value.**
    `nesting = 256` bounds lexical/bracket nesting, but the scanner's indentation
    stack is capped at 253 entries so its serialized state fits Tree-sitter's
-   1024-byte buffer. A 253-level indented source that passes the lexer is still
-   refused by the parser, and a 255-level one by the adjacent-structure guard.
-   `docs/grammar-coverage.md` records this as its own refused row
-   (`deep-indentation`), so the table does not imply that 256 indentation levels
-   are accepted.
+   1024-byte buffer. The measured boundary is 252 levels accepted and 253 refused:
+   a 253-level indented source that passes the lexer is still refused by the
+   parser, and a 255-level one by the adjacent-structure guard.
+   `docs/grammar-coverage.md` records both halves as their own rows
+   (`shallow-indentation` and `deep-indentation`), so the table states the
+   accepted depth rather than implying that 256 indentation levels are accepted.

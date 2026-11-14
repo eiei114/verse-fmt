@@ -41,15 +41,24 @@ fn pair() -> ContractPair {
 }
 
 #[test]
-fn documents_shared_toolchain_contract_version_one() {
-    let cli_docs = include_str!("../docs/cli.md");
-    assert!(cli_docs.contains("Shared toolchain contract version **1**."));
-}
-
-#[test]
 fn the_declared_pair_matches_this_repository() {
     let pair = pair();
-    let formatter = asserted_version(include_str!("../docs/cli.md")).unwrap_or_else(|| {
+    let cli_docs = include_str!("../docs/cli.md");
+    // The value is read from the record, never written into this test: a
+    // coordinated move of both documents and contract-pair.json must keep
+    // passing, while a document that stops carrying the version sentence fails.
+    let expected_sentence = format!(
+        "Shared toolchain contract version **{}**.",
+        pair.contract_version
+    );
+    assert!(
+        cli_docs.contains(&expected_sentence),
+        "{} does not state `{expected_sentence}`, which tests/fixtures/contract-pair.json \
+         records as contractVersion {}",
+        pair.formatter_doc,
+        pair.contract_version
+    );
+    let formatter = asserted_version(cli_docs).unwrap_or_else(|| {
         panic!(
             "{} does not assert a `Shared toolchain contract version **N**` value",
             pair.formatter_doc
