@@ -193,9 +193,11 @@ fn total_input_limit_is_enforced_at_sixty_four_mib() {
     assert_eq!(report["summary"]["filesChecked"], 8, "{report}");
     assert_eq!(report["summary"]["filesChanged"], 8, "{report}");
 
-    // The 64 MiB + 2 byte file sorts last, so the aggregate crosses the limit
-    // only after all eight files were analyzed.
-    put(root, "zz-extra.verse", b"A\n");
+    // One byte past the limit: the crossing file is a single byte, so a guard
+    // that wrongly accepted 64 MiB + 1 would pass a two-byte fixture instead of
+    // failing this test. The label sorts last, so the aggregate crosses the
+    // limit only after all eight files were analyzed.
+    put(root, "zz-extra.verse", b"A");
     let before = snapshot(root);
     let out = run(root, &[".", "--write", "--output-format", "json"]);
     let report = assert_refused(&out, "64 MiB total input one byte past");
@@ -238,9 +240,9 @@ fn a_source_ordered_after_the_total_input_limit_is_not_reported() {
             &vec![b' '; MAX_SOURCE_BYTES],
         );
     }
-    // Two bytes on top of exactly 64 MiB cross the aggregate limit; the label
+    // One byte on top of exactly 64 MiB crosses the aggregate limit; the label
     // sorts after the eight 8 MiB sources, so those are all analyzed first.
-    put(root, "m-crossing.verse", b"A\n");
+    put(root, "m-crossing.verse", b"A");
     // An eligible source that sorts after the crossing file. It must never be
     // read, analyzed or reported.
     put(root, "z-later.verse", b"Z:=7\n");
