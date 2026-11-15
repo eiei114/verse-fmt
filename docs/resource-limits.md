@@ -17,9 +17,10 @@ which forms the build accepts.
 `parser-design.md` and this file and compares each one with the constant in
 `src/documented_limits.rs`. A mismatch fails with the document, the claim and the
 actual value. The coverage table below names each limit by its key rather than by
-its value, and every other size or duration these three documents state must also
-be one of the documented constants: a number that restates a limit beside a
-checked pair cannot drift on its own. Set `VERSE_FMT_CONTRACT_DOC` to the vault
+its value, and any other size or duration these three documents state is compared
+with the limit its own line names, not merely with the set of documented values:
+a restated number beside a checked pair cannot drift on its own, and a value
+borrowed from another limit is rejected. Set `VERSE_FMT_CONTRACT_DOC` to the vault
 contract to check its wording against the same values.
 
 - `source-bytes = 8 MiB`

@@ -7,11 +7,12 @@
 //!
 //! A value restated in prose is guarded too, not only its `` `key = value` `` pair:
 //! the corpus counts may appear on the machine-checked claim line and nowhere
-//! else, every size or duration in the three documents that carry the limit
-//! contract must be one of the documented constants, and the coverage table
-//! names each limit by its key. Where a sentence used to repeat a documented
-//! number beside the pair, it now names the pair instead, so no unchecked copy
-//! of a documented value is left in those documents.
+//! else, a paragraph that names the corpus attributes every count in it, every
+//! size or duration in the three documents that carry the limit contract must
+//! equal the limit named on its own line, and the coverage table names each limit
+//! by its key. Where a sentence used to repeat a documented number beside the
+//! pair, it now names the pair instead, so no unchecked copy of a documented
+//! value is left in those documents.
 //!
 //! The limit literals come from `src/documented_limits.rs`, the same file the
 //! binary uses, so a changed limit cannot disagree with a document silently.
@@ -205,21 +206,52 @@ fn check_corpus_document(name: &str, text: &str, counts: Counts) -> Result<(), S
             "{name} claims `{line}`; tests/fixtures/corpus.json actually holds {counts}"
         ));
     }
-    for other in text.lines().filter(|other| *other != line) {
-        if !other.to_lowercase().contains("corpus") {
+    // A Markdown paragraph names the corpus once, and a wrapped count lands on a
+    // later line without the word: a per-line read skipped it, so a normal line
+    // wrap concealed a stale count. Attribution therefore runs to the end of the
+    // paragraph, whichever line carries the corpus word.
+    for paragraph in paragraphs(text) {
+        if !paragraph.iter().any(|piece| names_corpus(piece)) {
             continue;
         }
-        for phrase in CORPUS_COUNT_PHRASES {
-            if let Ok(number) = number_before(other, phrase) {
-                return Err(format!(
-                    "{name} quotes a second corpus count ({number} before {phrase:?}) in \
-                     {other:?}; the corpus has {counts}, and only the `{CORPUS_CLAIM}` line may \
-                     carry a count, because that is the one line this guard reads"
-                ));
+        for other in paragraph.iter().filter(|other| **other != line) {
+            for phrase in CORPUS_COUNT_PHRASES {
+                if let Ok(number) = number_before(other, phrase) {
+                    return Err(format!(
+                        "{name} quotes a second corpus count ({number} before {phrase:?}) in \
+                         {other:?}; the corpus has {counts}, and only the `{CORPUS_CLAIM}` line \
+                         may carry a count, because that is the one line this guard reads"
+                    ));
+                }
             }
         }
     }
     Ok(())
+}
+
+fn names_corpus(line: &str) -> bool {
+    line.to_lowercase().contains("corpus")
+}
+
+/// The document split into blank-line separated paragraphs. A count attributed to
+/// the corpus on one line stays a corpus count for the whole paragraph, so a
+/// wrapped sentence is read the same way as an unwrapped one.
+fn paragraphs(text: &str) -> Vec<Vec<&str>> {
+    let mut out = Vec::new();
+    let mut current: Vec<&str> = Vec::new();
+    for line in text.lines() {
+        if line.trim().is_empty() {
+            if !current.is_empty() {
+                out.push(std::mem::take(&mut current));
+            }
+            continue;
+        }
+        current.push(line);
+    }
+    if !current.is_empty() {
+        out.push(current);
+    }
+    out
 }
 
 /// The number written immediately before `label`, ignoring thousands separators.
@@ -282,6 +314,19 @@ fn a_prose_copy_of_the_corpus_counts_fails_beside_a_claim_line() {
     let error = check_corpus_document("synthetic.md", &prose, counts)
         .expect_err("a prose count of 87 must not pass beside a claim line of 88");
     assert!(error.contains("87"), "{error}");
+    // A wrapped claim: the corpus word stays on the first line and the stale count
+    // lands on the next one, which is exactly how a normal Markdown wrap hides it
+    // from a per-line read.
+    let wrapped = format!("{good}The corpus contains:\n99 golden cases.\n");
+    let error = check_corpus_document("synthetic.md", &wrapped, counts)
+        .expect_err("a wrapped corpus count of 99 must not pass beside a claim line of 88");
+    assert!(error.contains("99"), "{error}");
+    // The same wrap with the correct counts is still a second copy: only the claim
+    // line may carry a count.
+    let wrapped_correct = format!("{good}The corpus contains:\n65 golden cases.\n");
+    let error = check_corpus_document("synthetic.md", &wrapped_correct, counts)
+        .expect_err("a wrapped prose copy must not pass even with the right numbers");
+    assert!(error.contains("65"), "{error}");
     let stale = "Corpus counts: 87 cases total, 64 golden and 23 refusal.\n";
     let error = check_corpus_document("synthetic.md", stale, counts)
         .expect_err("a claim line that disagrees with the corpus must fail");
@@ -390,11 +435,13 @@ fn compare_stated(name: &str, key: &str, raw: &str) {
     );
 }
 
-/// Every size or duration a document states, with its unit. Only an explicit
-/// unit counts, so a path, an offset or a count in prose is not read as a limit;
-/// `-second` is read like `seconds`, because that is how the measurement rows
-/// used to name the parse budget.
-fn stated_sizes(text: &str) -> Vec<(String, Value)> {
+/// Every size or duration a document states, with its unit and the character offset
+/// the number starts at, so a quantity can be attributed to the limit named nearest
+/// to it. Only an explicit unit counts, so a path, an offset or a plain count is not
+/// read as a limit; `9-second` and `9 seconds` are both a duration, because a
+/// measurement row may write either form and a change to `9-second` used to slip
+/// past the unit scan entirely.
+fn stated_sizes(text: &str) -> Vec<(usize, String, Value)> {
     let chars: Vec<char> = text.chars().collect();
     let mut out = Vec::new();
     let mut index = 0;
@@ -412,6 +459,13 @@ fn stated_sizes(text: &str) -> Vec<(String, Value)> {
         while after < chars.len() && chars[after].is_whitespace() {
             after += 1;
         }
+        // `9-second` writes a hyphen between the number and the unit; skip it
+        // instead of stopping the unit scan there and dropping the quantity.
+        if chars.get(after) == Some(&'-')
+            && chars.get(after + 1).is_some_and(|ch| ch.is_alphabetic())
+        {
+            after += 1;
+        }
         let mut unit_end = after;
         while unit_end < chars.len() && chars[unit_end].is_ascii_alphabetic() {
             unit_end += 1;
@@ -427,77 +481,112 @@ fn stated_sizes(text: &str) -> Vec<(String, Value)> {
             _ => None,
         };
         if let Some(value) = value {
-            out.push((format!("{raw_number} {unit}"), value));
+            out.push((start, format!("{raw_number} {unit}"), value));
         }
         index = unit_end.max(index);
     }
     out
 }
 
+/// The documented limit a stated quantity is attributed to: the key whose name sits
+/// nearest to the number on that line. A value repeated in prose beside a
+/// `` `key = value` `` pair is then compared with that key rather than merely being
+/// required to appear somewhere among the constants, so
+/// ``The aggregate input limit (`total-bytes = 64 MiB`) stops at 8 MiB`` fails: both
+/// quantities are in the constant set, but `8 MiB` belongs to `source-bytes`.
+fn attributed_key<'a>(line: &'a str, offset: usize, keys: &[&'a str]) -> Option<&'a str> {
+    keys.iter()
+        .copied()
+        .filter_map(|key| {
+            line.match_indices(key)
+                .map(|(at, _)| (at.abs_diff(offset), key))
+                .min_by_key(|(distance, _)| *distance)
+        })
+        .min_by_key(|(distance, _)| *distance)
+        .map(|(_, key)| key)
+}
+
+/// Check every stated quantity in one document line against the limit it names.
+fn check_stated_line(name: &str, line: &str) -> Result<(), String> {
+    for (offset, raw, value) in stated_sizes(line) {
+        let Some(key) = attributed_key(line, offset, LIMIT_KEYS) else {
+            return Err(format!(
+                "{name} states {raw} in {line:?} without naming which limit it is; state the \
+                 limit as `` `key = value` `` beside the number, or drop the number, because \
+                 an unattributed value cannot be checked against src/documented_limits.rs"
+            ));
+        };
+        let expected = constant(key).unwrap_or_else(|| panic!("{key} is not a documented limit"));
+        if value != expected {
+            return Err(format!(
+                "{name} states {raw} next to `{key}`, but src/documented_limits.rs holds \
+                 {expected} for `{key}`; the number must equal the limit it names, not merely \
+                 be one of the documented values"
+            ));
+        }
+    }
+    Ok(())
+}
+
 /// The documents that carry the limit contract may not state a size or duration
-/// that is not one of the documented limits. Two shapes of unchecked copy used to
-/// survive here: `docs/cli.md` restated the aggregate input limit in a sentence,
+/// without checking it against the limit it names. Two shapes of unchecked copy used
+/// to survive here: `docs/cli.md` restated the aggregate input limit in a sentence,
 /// and the coverage table named its rows by value, so changing only that copy left
-/// every drift test green. The prose now names the `` `key = value` `` pair instead,
-/// and this test makes that rule enforceable rather than merely intended.
+/// every drift test green. Matching a value against the whole constant set was not
+/// enough either — a `8 MiB` copy beside a `total-bytes = 64 MiB` pair passed — so a
+/// quantity is now compared with the specific limit it sits next to.
 #[test]
-fn every_stated_size_is_a_documented_limit() {
-    let constants: BTreeSet<Value> = LIMIT_KEYS.iter().filter_map(|key| constant(key)).collect();
+fn every_stated_size_matches_the_limit_it_names() {
     for name in [
         "docs/cli.md",
         "docs/parser-design.md",
         "docs/resource-limits.md",
     ] {
         let text = read(name);
-        for (raw, value) in stated_sizes(&text) {
-            assert!(
-                constants.contains(&value),
-                "{name} states {raw}, which is not one of the documented limits; state the \
-                 limit as `` `key = value` `` or drop the number, because a second copy \
-                 cannot be checked against src/documented_limits.rs"
-            );
+        for line in text.lines() {
+            if let Err(error) = check_stated_line(name, line) {
+                panic!("{error}");
+            }
         }
     }
 }
 
-/// The prose copies this guard now rejects, pinned: a drifted sentence and a
-/// drifted table row must both fail, and the correct pair form must pass.
+/// The quantities this guard now rejects, pinned: a drifted sentence, a value
+/// borrowed from another limit, a `9-second` duration and an unattributed number
+/// must all fail, while the correct pair form and a matching restatement pass.
 #[test]
 fn a_prose_limit_value_beside_a_checked_pair_fails() {
-    let constants: BTreeSet<Value> = LIMIT_KEYS.iter().filter_map(|key| constant(key)).collect();
     let good = "The aggregate input limit (`total-bytes = 64 MiB`) stops analysis.\n";
-    for (raw, value) in stated_sizes(good) {
-        assert!(
-            constants.contains(&value),
-            "{raw} must be a documented limit"
-        );
-    }
+    check_stated_line("synthetic.md", good).expect("the checked pair alone must pass");
+    // A prose restatement that matches its own limit is checked, not rejected.
+    let restated = "| `source-bytes` | 8 MiB per source | `tests/resource-limits.rs` |\n";
+    check_stated_line("synthetic.md", restated)
+        .expect("an 8 MiB restatement of `source-bytes` must pass");
     let drifted = "The aggregate input limit (`total-bytes = 64 MiB`) stops at 65 MiB.\n";
-    let values: Vec<Value> = stated_sizes(drifted)
-        .into_iter()
-        .map(|(_, value)| value)
-        .collect();
-    assert!(
-        values.iter().any(|value| !constants.contains(value)),
-        "a drifted `65 MiB` copy must not read as a documented limit: {values:?}"
-    );
-    let row = "| 8 MiB per source | `tests/resource-limits.rs::source_byte_limit_is_enforced_at_eight_mib` |\n";
-    for (raw, value) in stated_sizes(row) {
-        assert!(
-            constants.contains(&value),
-            "{raw} must be a documented limit"
-        );
-    }
-    let drifted_row = row.replace("| 8 MiB per source", "| 9 MiB per source");
-    assert_ne!(drifted_row, row, "the fixture wording moved");
-    let values: Vec<Value> = stated_sizes(&drifted_row)
-        .into_iter()
-        .map(|(_, value)| value)
-        .collect();
-    assert!(
-        values.iter().any(|value| !constants.contains(value)),
-        "a drifted `9 MiB` row label must not read as a documented limit: {values:?}"
-    );
+    let error = check_stated_line("synthetic.md", drifted)
+        .expect_err("a drifted `65 MiB` copy must not pass beside the pair");
+    assert!(error.contains("65 MiB"), "{error}");
+    assert!(error.contains("`total-bytes`"), "{error}");
+    // The cross-limit case: both quantities are documented values, but `8 MiB`
+    // belongs to another limit, so a byte-set membership check passed it.
+    let cross = "The aggregate input limit (`total-bytes = 64 MiB`) stops at 8 MiB.\n";
+    let error = check_stated_line("synthetic.md", cross)
+        .expect_err("an `8 MiB` copy must be compared with `total-bytes`, not accepted as a limit");
+    assert!(error.contains("`total-bytes`"), "{error}");
+    // The hyphenated duration form the measurement rows use.
+    let row = "| `parse-budget` | 2-second parse budget | `src/syntax.rs` |\n";
+    check_stated_line("synthetic.md", row)
+        .expect("the documented `2-second` duration must pass beside `parse-budget`");
+    let drifted_row = "| `parse-budget` | 9-second parse budget | `src/syntax.rs` |\n";
+    let error = check_stated_line("synthetic.md", drifted_row)
+        .expect_err("a `9-second` duration must be read and rejected, not skipped");
+    assert!(error.contains("9 second"), "{error}");
+    assert!(error.contains("`parse-budget`"), "{error}");
+    // A size with no limit name on its line cannot be checked at all.
+    let orphan = "A 9 MiB source limit applies.\n";
+    let error = check_stated_line("synthetic.md", orphan)
+        .expect_err("an unattributed `9 MiB` must not pass without naming its limit");
+    assert!(error.contains("without naming which limit"), "{error}");
 }
 
 #[test]
