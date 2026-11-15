@@ -214,15 +214,23 @@ fn check_corpus_document(name: &str, text: &str, counts: Counts) -> Result<(), S
         if !paragraph.iter().any(|piece| names_corpus(piece)) {
             continue;
         }
-        for other in paragraph.iter().filter(|other| **other != line) {
-            for phrase in CORPUS_COUNT_PHRASES {
-                if let Ok(number) = number_before(other, phrase) {
-                    return Err(format!(
-                        "{name} quotes a second corpus count ({number} before {phrase:?}) in \
-                         {other:?}; the corpus has {counts}, and only the `{CORPUS_CLAIM}` line \
-                         may carry a count, because that is the one line this guard reads"
-                    ));
-                }
+        let rest: Vec<&str> = paragraph
+            .iter()
+            .copied()
+            .filter(|other| *other != line)
+            .collect();
+        // The lines of the paragraph are one sentence once the wrap is undone, so a
+        // count split from its label ("contains 99" / "golden cases.") is read the
+        // same way an unwrapped one is. Reading each line alone left that count
+        // unguarded.
+        let joined = rest.join(" ");
+        for phrase in CORPUS_COUNT_PHRASES {
+            if let Ok(number) = number_before(&joined, phrase) {
+                return Err(format!(
+                    "{name} quotes a second corpus count ({number} before {phrase:?}) in \
+                     {joined:?}; the corpus has {counts}, and only the `{CORPUS_CLAIM}` line \
+                     may carry a count, because that is the one line this guard reads"
+                ));
             }
         }
     }
@@ -327,6 +335,12 @@ fn a_prose_copy_of_the_corpus_counts_fails_beside_a_claim_line() {
     let error = check_corpus_document("synthetic.md", &wrapped_correct, counts)
         .expect_err("a wrapped prose copy must not pass even with the right numbers");
     assert!(error.contains("65"), "{error}");
+    // A wrap that splits the number from its own label: neither line carries both,
+    // so a per-line read saw nothing to reject.
+    let split = format!("{good}The corpus contains 99\ngolden cases.\n");
+    let error = check_corpus_document("synthetic.md", &split, counts)
+        .expect_err("a count split from its label by a line wrap must still be read");
+    assert!(error.contains("99"), "{error}");
     let stale = "Corpus counts: 87 cases total, 64 golden and 23 refusal.\n";
     let error = check_corpus_document("synthetic.md", stale, counts)
         .expect_err("a claim line that disagrees with the corpus must fail");
@@ -488,32 +502,73 @@ fn stated_sizes(text: &str) -> Vec<(usize, String, Value)> {
     out
 }
 
-/// The documented limit a stated quantity is attributed to: the key whose name sits
-/// nearest to the number on that line. A value repeated in prose beside a
+/// The documented limit a stated quantity is attributed to: the key that names a
+/// limit in the quantity's own clause. A value repeated in prose beside a
 /// `` `key = value` `` pair is then compared with that key rather than merely being
 /// required to appear somewhere among the constants, so
 /// ``The aggregate input limit (`total-bytes = 64 MiB`) stops at 8 MiB`` fails: both
 /// quantities are in the constant set, but `8 MiB` belongs to `source-bytes`.
+///
+/// The clause scope matters on its own: ``(`total-bytes = 64 MiB`) stops at 8 MiB;
+/// `source-bytes` is per file`` names the right key on the same line, and a nearest
+/// key picked across the whole line handed that aggregate quantity to
+/// `source-bytes`, which accepted the false statement.
 fn attributed_key<'a>(line: &'a str, offset: usize, keys: &[&'a str]) -> Option<&'a str> {
+    let (clause_start, clause) = clause_around(line, offset);
     keys.iter()
         .copied()
-        .filter_map(|key| {
-            line.match_indices(key)
-                .map(|(at, _)| (at.abs_diff(offset), key))
-                .min_by_key(|(distance, _)| *distance)
+        .filter(|key| clause.contains(*key))
+        .min_by_key(|key| {
+            clause
+                .match_indices(*key)
+                .map(|(at, _)| at.abs_diff(offset - clause_start))
+                .min()
+                .unwrap_or(usize::MAX)
         })
-        .min_by_key(|(distance, _)| *distance)
-        .map(|(_, key)| key)
+}
+
+/// The clause of `line` that contains the byte at `offset`, and where it starts.
+/// Boundaries are the ones the vault claim reader uses: a sentence end, a list
+/// separator, or a comma followed by whitespace, so the attribution cannot jump
+/// over a `;` to a key that belongs to the next statement.
+fn clause_around(line: &str, offset: usize) -> (usize, &str) {
+    let mut start = 0;
+    let mut end = line.len();
+    for (index, ch) in line.char_indices() {
+        let rest = &line[index + ch.len_utf8()..];
+        let next_is_whitespace = rest.chars().next().is_none_or(char::is_whitespace);
+        let boundary = match ch {
+            '。' => true,
+            '、' | '・' | ';' => true,
+            ',' => next_is_whitespace || rest.is_empty(),
+            '.' => next_is_whitespace,
+            _ => false,
+        };
+        if !boundary {
+            continue;
+        }
+        if index + ch.len_utf8() <= offset {
+            start = index + ch.len_utf8();
+        } else {
+            end = index;
+            break;
+        }
+    }
+    (start, &line[start..end])
 }
 
 /// Check every stated quantity in one document line against the limit it names.
 fn check_stated_line(name: &str, line: &str) -> Result<(), String> {
-    for (offset, raw, value) in stated_sizes(line) {
+    for (char_offset, raw, value) in stated_sizes(line) {
+        let Some(offset) = line.char_indices().nth(char_offset).map(|(byte, _)| byte) else {
+            continue;
+        };
         let Some(key) = attributed_key(line, offset, LIMIT_KEYS) else {
             return Err(format!(
-                "{name} states {raw} in {line:?} without naming which limit it is; state the \
-                 limit as `` `key = value` `` beside the number, or drop the number, because \
-                 an unattributed value cannot be checked against src/documented_limits.rs"
+                "{name} states {raw} in {line:?} without naming, in the same clause, which limit \
+                 it is; state the limit beside the number as `` `key = value` ``, or drop the \
+                 number, because a quantity attributed to another statement cannot be checked \
+                 against src/documented_limits.rs"
             ));
         };
         let expected = constant(key).unwrap_or_else(|| panic!("{key} is not a documented limit"));
@@ -573,6 +628,11 @@ fn a_prose_limit_value_beside_a_checked_pair_fails() {
     let error = check_stated_line("synthetic.md", cross)
         .expect_err("an `8 MiB` copy must be compared with `total-bytes`, not accepted as a limit");
     assert!(error.contains("`total-bytes`"), "{error}");
+    // A second key later in the same line must not take the aggregate quantity.
+    let cross_with_key = "The aggregate limit (`total-bytes = 64 MiB`) stops at 8 MiB; `source-bytes` is per file.\n";
+    let error = check_stated_line("synthetic.md", cross_with_key)
+        .expect_err("an `8 MiB` aggregate claim must not be attributed to `source-bytes`");
+    assert!(error.contains("`total-bytes`"), "{error}");
     // The hyphenated duration form the measurement rows use.
     let row = "| `parse-budget` | 2-second parse budget | `src/syntax.rs` |\n";
     check_stated_line("synthetic.md", row)
@@ -582,11 +642,14 @@ fn a_prose_limit_value_beside_a_checked_pair_fails() {
         .expect_err("a `9-second` duration must be read and rejected, not skipped");
     assert!(error.contains("9 second"), "{error}");
     assert!(error.contains("`parse-budget`"), "{error}");
-    // A size with no limit name on its line cannot be checked at all.
+    // A size with no limit name in its clause cannot be checked at all.
     let orphan = "A 9 MiB source limit applies.\n";
     let error = check_stated_line("synthetic.md", orphan)
         .expect_err("an unattributed `9 MiB` must not pass without naming its limit");
-    assert!(error.contains("without naming which limit"), "{error}");
+    assert!(
+        error.contains("without naming, in the same clause"),
+        "{error}"
+    );
 }
 
 #[test]
