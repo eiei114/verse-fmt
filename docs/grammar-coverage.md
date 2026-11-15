@@ -59,7 +59,7 @@ is normalized without changing their tokens. Blank-line runs outside protected
 regions are reduced to one. Explicit EOL conversion is refused if it would
 change bytes inside a multiline string/comment.
 
-`tests/fixtures/corpus.json` maps 87 named inputs to independent golden output or
+`tests/fixtures/corpus.json` maps the named inputs to independent golden output or
 explicit refusal. Corpus counts: 87 cases total, 64 golden and 23 refusal.
 That split is asserted by `tests/docs-drift.rs`, so no document can quote a
 count the fixture file contradicts. Categories include normal/boundary/rejection

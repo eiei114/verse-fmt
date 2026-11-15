@@ -69,8 +69,8 @@ bytes and the local scanner. Maintainer regeneration uses
 These extensions are syntax coverage, not official language validation.
 
 The scanner's indentation stack is capped at 253 entries so its serialized
-state fits Tree-sitter 0.25.10's 1024-byte buffer. Deeper indentation fails
-closed. This is a parser-safety bound, not a Verse language limit.
+state fits the fixed buffer Tree-sitter 0.25.10 reserves for it. Deeper
+indentation fails closed. This is a parser-safety bound, not a Verse language limit.
 
 ## Independent safeguards
 
@@ -161,7 +161,7 @@ license are in `vendor/tree-sitter-verse/upstream.md`. Local probe logs under
 
 ## Expanded corpus
 
-`tests/fixtures/corpus.json` contains 87 self-authored named cases, with
+`tests/fixtures/corpus.json` contains self-authored named cases, with
 malformed input and known unsupported forms clearly categorized.
 Corpus counts: 87 cases total, 64 golden and 23 refusal.
 The corpus test invokes the real CLI and rechecks every successful output for

@@ -5,6 +5,14 @@
 //! grammar-coverage table and the shared contract version. A mismatch fails with
 //! the document, the claim and the actual value, so the fix is obvious.
 //!
+//! A value restated in prose is guarded too, not only its `` `key = value` `` pair:
+//! the corpus counts may appear on the machine-checked claim line and nowhere
+//! else, every size or duration in the three documents that carry the limit
+//! contract must be one of the documented constants, and the coverage table
+//! names each limit by its key. Where a sentence used to repeat a documented
+//! number beside the pair, it now names the pair instead, so no unchecked copy
+//! of a documented value is left in those documents.
+//!
 //! The limit literals come from `src/documented_limits.rs`, the same file the
 //! binary uses, so a changed limit cannot disagree with a document silently.
 
@@ -41,8 +49,15 @@ const INPUT_KEYS: &[&str] = &[
     "exclude-glob-bytes",
 ];
 
-/// Limits the parser document restates.
-const PARSER_KEYS: &[&str] = &["tokens", "parse-budget", "cst-depth", "fingerprint-events"];
+/// Limits the parser document restates. `nesting` belongs here too: the parser
+/// document states the lexical nesting pair the CLI document also carries.
+const PARSER_KEYS: &[&str] = &[
+    "tokens",
+    "parse-budget",
+    "cst-depth",
+    "fingerprint-events",
+    "nesting",
+];
 
 /// Every documented limit, including the two only the limit table names.
 const LIMIT_KEYS: &[&str] = &[
@@ -72,10 +87,16 @@ fn read(path: &str) -> String {
         .unwrap_or_else(|error| panic!("cannot read {path}: {error}"))
 }
 
-/// `README.md` plus every Markdown document under `docs/`, so a new document
-/// that quotes a number is checked without editing this test.
+/// `README.md`, `tests/fixtures/provenance.md` plus every Markdown document under
+/// `docs/`, so a new document that quotes a number is checked without editing
+/// this test. `tests/fixtures/provenance.md` carries the corpus claim line the
+/// guard reads, and it was outside this list: a wrong count there left the
+/// guard green.
 fn documents() -> Vec<String> {
-    let mut names = vec!["README.md".to_owned()];
+    let mut names = vec![
+        "README.md".to_owned(),
+        "tests/fixtures/provenance.md".to_owned(),
+    ];
     for entry in fs::read_dir(root().join("docs")).unwrap() {
         let name = entry.unwrap().file_name().into_string().unwrap();
         if name.ends_with(".md") {
@@ -99,7 +120,7 @@ struct CorpusCase {
     reject: bool,
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct Counts {
     total: usize,
     golden: usize,
@@ -135,6 +156,72 @@ fn quotes_corpus_counts(text: &str) -> bool {
             && (text.contains("golden") || text.contains("refusal")))
 }
 
+/// Phrasings a corpus count is written next to. A number beside one of these, on
+/// a line that names the corpus, is a claim about `corpus.json`, so only the
+/// machine-checked `Corpus counts:` line may carry the count: a second, prose
+/// copy is exactly what the guard used to leave unchecked, because it read only
+/// that one line.
+const CORPUS_COUNT_PHRASES: &[&str] = &[
+    "cases total",
+    "cases",
+    "golden",
+    "refusal",
+    "named inputs",
+    "named cases",
+    "named,",
+    "self-authored named",
+];
+
+/// One document's corpus claim: the single `Corpus counts:` line must match the
+/// fixture, and no other line may quote a corpus count. Both halves are needed —
+/// the claim line alone let a prose copy drift, and a prose count alone would
+/// carry no check at all.
+fn check_corpus_document(name: &str, text: &str, counts: Counts) -> Result<(), String> {
+    if !quotes_corpus_counts(text) {
+        return Ok(());
+    }
+    let line = text
+        .lines()
+        .find(|line| line.contains(CORPUS_CLAIM))
+        .ok_or_else(|| {
+            format!(
+                "{name} quotes corpus counts but has no `{CORPUS_CLAIM} <total> cases total, \
+                 <golden> golden and <refusal> refusal` line; the corpus has {counts}"
+            )
+        })?;
+    let claimed = Counts {
+        total: number_before(line, "cases total").map_err(|error| {
+            format!("{name}: claim line {line:?} is unreadable: {error}; the corpus has {counts}")
+        })?,
+        golden: number_before(line, "golden").map_err(|error| {
+            format!("{name}: claim line {line:?} is unreadable: {error}; the corpus has {counts}")
+        })?,
+        refusal: number_before(line, "refusal").map_err(|error| {
+            format!("{name}: claim line {line:?} is unreadable: {error}; the corpus has {counts}")
+        })?,
+    };
+    if claimed != counts {
+        return Err(format!(
+            "{name} claims `{line}`; tests/fixtures/corpus.json actually holds {counts}"
+        ));
+    }
+    for other in text.lines().filter(|other| *other != line) {
+        if !other.to_lowercase().contains("corpus") {
+            continue;
+        }
+        for phrase in CORPUS_COUNT_PHRASES {
+            if let Ok(number) = number_before(other, phrase) {
+                return Err(format!(
+                    "{name} quotes a second corpus count ({number} before {phrase:?}) in \
+                     {other:?}; the corpus has {counts}, and only the `{CORPUS_CLAIM}` line may \
+                     carry a count, because that is the one line this guard reads"
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
 /// The number written immediately before `label`, ignoring thousands separators.
 /// Every occurrence of the label is tried, so a word that also appears earlier
 /// in the sentence (`` `refusal` `` before the numbers) does not break the read.
@@ -165,40 +252,12 @@ fn every_document_quotes_the_actual_corpus_counts() {
     let mut checked = Vec::new();
     for name in documents() {
         let text = read(&name);
-        if !quotes_corpus_counts(&text) {
-            continue;
+        if let Err(error) = check_corpus_document(&name, &text, counts) {
+            panic!("{error}");
         }
-        let line = text
-            .lines()
-            .find(|line| line.contains(CORPUS_CLAIM))
-            .unwrap_or_else(|| {
-                panic!(
-                    "{name} quotes corpus counts but has no `{CORPUS_CLAIM} <total> cases total, \
-                 <golden> golden and <refusal> refusal` line; the corpus has {counts}"
-                )
-            });
-        let claimed = Counts {
-            total: number_before(line, "cases total").unwrap_or_else(|error| {
-                panic!(
-                    "{name}: claim line {line:?} is unreadable: {error}; the corpus has {counts}"
-                )
-            }),
-            golden: number_before(line, "golden").unwrap_or_else(|error| {
-                panic!(
-                    "{name}: claim line {line:?} is unreadable: {error}; the corpus has {counts}"
-                )
-            }),
-            refusal: number_before(line, "refusal").unwrap_or_else(|error| {
-                panic!(
-                    "{name}: claim line {line:?} is unreadable: {error}; the corpus has {counts}"
-                )
-            }),
-        };
-        assert_eq!(
-            claimed, counts,
-            "{name} claims `{line}`; tests/fixtures/corpus.json actually holds {counts}"
-        );
-        checked.push(name);
+        if quotes_corpus_counts(&text) {
+            checked.push(name);
+        }
     }
     assert!(
         !checked.is_empty(),
@@ -206,9 +265,48 @@ fn every_document_quotes_the_actual_corpus_counts() {
     );
 }
 
+/// The prose copy the guard used to miss, pinned: a correct claim line with a
+/// stale count somewhere else must fail, and a claim line that disagrees must
+/// fail on its own.
+#[test]
+fn a_prose_copy_of_the_corpus_counts_fails_beside_a_claim_line() {
+    let counts = Counts {
+        total: 88,
+        golden: 65,
+        refusal: 23,
+    };
+    let good = "Corpus counts: 88 cases total, 65 golden and 23 refusal.\n";
+    check_corpus_document("synthetic.md", good, counts).expect("the matching claim line must pass");
+    let prose =
+        format!("{good}`tests/fixtures/corpus.json` maps 87 named inputs to independent output.\n");
+    let error = check_corpus_document("synthetic.md", &prose, counts)
+        .expect_err("a prose count of 87 must not pass beside a claim line of 88");
+    assert!(error.contains("87"), "{error}");
+    let stale = "Corpus counts: 87 cases total, 64 golden and 23 refusal.\n";
+    let error = check_corpus_document("synthetic.md", stale, counts)
+        .expect_err("a claim line that disagrees with the corpus must fail");
+    assert!(error.contains("88 cases total"), "{error}");
+}
+
+/// A different corpus count is still a corpus count: the claim line is the one
+/// line the guard reads, so a document that writes a count in prose only would
+/// be unchecked rather than wrong.
+#[test]
+fn a_document_that_quotes_counts_in_prose_alone_must_state_the_claim_line() {
+    let counts = Counts {
+        total: 87,
+        golden: 64,
+        refusal: 23,
+    };
+    let prose = "The corpus holds 64 golden cases and 23 refusal cases.\n";
+    let error = check_corpus_document("synthetic.md", prose, counts)
+        .expect_err("prose counts without a claim line must fail");
+    assert!(error.contains(CORPUS_CLAIM), "{error}");
+}
+
 // -------------------------------------------------------------- resource limits
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 enum Value {
     Bytes(usize),
     Count(usize),
@@ -289,6 +387,116 @@ fn compare_stated(name: &str, key: &str, raw: &str) {
     assert_eq!(
         actual, expected,
         "{name} claims `{key} = {raw}`, but src/documented_limits.rs holds {expected}"
+    );
+}
+
+/// Every size or duration a document states, with its unit. Only an explicit
+/// unit counts, so a path, an offset or a count in prose is not read as a limit;
+/// `-second` is read like `seconds`, because that is how the measurement rows
+/// used to name the parse budget.
+fn stated_sizes(text: &str) -> Vec<(String, Value)> {
+    let chars: Vec<char> = text.chars().collect();
+    let mut out = Vec::new();
+    let mut index = 0;
+    while index < chars.len() {
+        if !chars[index].is_ascii_digit() {
+            index += 1;
+            continue;
+        }
+        let start = index;
+        while index < chars.len() && (chars[index].is_ascii_digit() || chars[index] == ',') {
+            index += 1;
+        }
+        let raw_number: String = chars[start..index].iter().collect();
+        let mut after = index;
+        while after < chars.len() && chars[after].is_whitespace() {
+            after += 1;
+        }
+        let mut unit_end = after;
+        while unit_end < chars.len() && chars[unit_end].is_ascii_alphabetic() {
+            unit_end += 1;
+        }
+        let unit: String = chars[after..unit_end].iter().collect();
+        let number = raw_number.replace(',', "");
+        let parsed = number.parse::<usize>().ok();
+        let value = match (unit.as_str(), parsed) {
+            ("MiB", Some(number)) => Some(Value::Bytes(number.saturating_mul(MIB))),
+            ("KiB", Some(number)) => Some(Value::Bytes(number.saturating_mul(KIB))),
+            ("bytes" | "byte", Some(number)) => Some(Value::Bytes(number)),
+            ("seconds" | "second", Some(number)) => Some(Value::Seconds(number as u64)),
+            _ => None,
+        };
+        if let Some(value) = value {
+            out.push((format!("{raw_number} {unit}"), value));
+        }
+        index = unit_end.max(index);
+    }
+    out
+}
+
+/// The documents that carry the limit contract may not state a size or duration
+/// that is not one of the documented limits. Two shapes of unchecked copy used to
+/// survive here: `docs/cli.md` restated the aggregate input limit in a sentence,
+/// and the coverage table named its rows by value, so changing only that copy left
+/// every drift test green. The prose now names the `` `key = value` `` pair instead,
+/// and this test makes that rule enforceable rather than merely intended.
+#[test]
+fn every_stated_size_is_a_documented_limit() {
+    let constants: BTreeSet<Value> = LIMIT_KEYS.iter().filter_map(|key| constant(key)).collect();
+    for name in [
+        "docs/cli.md",
+        "docs/parser-design.md",
+        "docs/resource-limits.md",
+    ] {
+        let text = read(name);
+        for (raw, value) in stated_sizes(&text) {
+            assert!(
+                constants.contains(&value),
+                "{name} states {raw}, which is not one of the documented limits; state the \
+                 limit as `` `key = value` `` or drop the number, because a second copy \
+                 cannot be checked against src/documented_limits.rs"
+            );
+        }
+    }
+}
+
+/// The prose copies this guard now rejects, pinned: a drifted sentence and a
+/// drifted table row must both fail, and the correct pair form must pass.
+#[test]
+fn a_prose_limit_value_beside_a_checked_pair_fails() {
+    let constants: BTreeSet<Value> = LIMIT_KEYS.iter().filter_map(|key| constant(key)).collect();
+    let good = "The aggregate input limit (`total-bytes = 64 MiB`) stops analysis.\n";
+    for (raw, value) in stated_sizes(good) {
+        assert!(
+            constants.contains(&value),
+            "{raw} must be a documented limit"
+        );
+    }
+    let drifted = "The aggregate input limit (`total-bytes = 64 MiB`) stops at 65 MiB.\n";
+    let values: Vec<Value> = stated_sizes(drifted)
+        .into_iter()
+        .map(|(_, value)| value)
+        .collect();
+    assert!(
+        values.iter().any(|value| !constants.contains(value)),
+        "a drifted `65 MiB` copy must not read as a documented limit: {values:?}"
+    );
+    let row = "| 8 MiB per source | `tests/resource-limits.rs::source_byte_limit_is_enforced_at_eight_mib` |\n";
+    for (raw, value) in stated_sizes(row) {
+        assert!(
+            constants.contains(&value),
+            "{raw} must be a documented limit"
+        );
+    }
+    let drifted_row = row.replace("| 8 MiB per source", "| 9 MiB per source");
+    assert_ne!(drifted_row, row, "the fixture wording moved");
+    let values: Vec<Value> = stated_sizes(&drifted_row)
+        .into_iter()
+        .map(|(_, value)| value)
+        .collect();
+    assert!(
+        values.iter().any(|value| !constants.contains(value)),
+        "a drifted `9 MiB` row label must not read as a documented limit: {values:?}"
     );
 }
 
@@ -376,48 +584,82 @@ fn clause_names_limit(clause: &str, key: &str) -> bool {
 }
 
 /// Split prose into claim-sized pieces at sentence, list-item and line
-/// boundaries. `` `verse.toml` `` keeps its dot: a `.` only ends a clause when
-/// whitespace or the end of the text follows it.
-fn clauses(text: &str) -> Vec<&str> {
+/// boundaries. `` `verse.toml` `` keeps its dot: a `.` only ends a sentence when
+/// whitespace or the end of the text follows it. Each piece also reports whether
+/// it ended a sentence, so attribution cannot leak across a sentence break.
+///
+/// `,` is a boundary too when whitespace follows it, so `128 KiB, 256 KiB` is two
+/// pieces; a thousands separator (`10,000`) is not followed by whitespace and
+/// stays inside one piece.
+fn clauses(text: &str) -> Vec<(&str, bool)> {
     let mut out = Vec::new();
     let mut start = 0;
     for (index, ch) in text.char_indices() {
-        let boundary = match ch {
-            '\n' | '\r' | '。' | '、' | '・' | ';' => true,
-            '.' => text[index + 1..]
-                .chars()
-                .next()
-                .is_none_or(|next| next.is_whitespace()),
-            _ => false,
+        let rest = &text[index + ch.len_utf8()..];
+        let next_is_whitespace = rest.chars().next().is_none_or(char::is_whitespace);
+        let (boundary, ends_sentence) = match ch {
+            '\n' | '\r' => (true, false),
+            '。' => (true, true),
+            '、' | '・' | ';' => (true, false),
+            ',' => (next_is_whitespace || rest.is_empty(), false),
+            '.' => (next_is_whitespace, true),
+            _ => (false, false),
         };
         if boundary {
-            out.push(&text[start..index]);
+            out.push((&text[start..index], ends_sentence));
             start = index + ch.len_utf8();
         }
     }
-    out.push(&text[start..]);
+    out.push((&text[start..], true));
     out
 }
 
-/// Every clause attributed to the limits it names. A clause that names no limit
-/// keeps the previous attribution, so a value written after its naming — as the
-/// vault's single limit sentence does — still belongs to that limit.
+/// Every clause attributed to the limits it names.
+///
+/// A claim runs from the clause that names a limit to the first clause that
+/// carries a quantity — the vault writes upper bounds as `上限は1ファイル
+/// 8 MiB`, so a number written after its naming belongs to that limit. Past that
+/// number the claim is complete and stops absorbing text, and a sentence break
+/// ends it as well. Both rules exist because the previous "keep the last
+/// attribution until another limit is named" version passed a `128 KiB`
+/// configuration claim: an unrelated `256 KiB` later in the same sentence still
+/// satisfied the check, and the claim it printed was the rest of the document.
 fn vault_claims(text: &str, keys: &[&str]) -> BTreeMap<String, String> {
     let mut claims: BTreeMap<String, String> = BTreeMap::new();
     let mut current: Vec<String> = Vec::new();
-    for clause in clauses(text) {
+    let mut current_holds_number = false;
+    for (clause, ends_sentence) in clauses(text) {
         let named: Vec<String> = keys
             .iter()
             .filter(|key| clause_names_limit(clause, key))
             .map(|key| (*key).to_owned())
             .collect();
+        let numbers = !quantities(clause).is_empty();
         if !named.is_empty() {
             current = named;
+            current_holds_number = numbers;
+        } else if numbers {
+            // A number in a clause that names no limit is either this claim's
+            // value or, when this claim already holds one, the start of something
+            // else: a later limit's value must not be absorbed here.
+            if current_holds_number {
+                current.clear();
+                continue;
+            }
+            current_holds_number = true;
+        } else if current_holds_number {
+            // The claim is complete; prose after it is not part of the claim.
+            current.clear();
+            continue;
         }
         for key in &current {
             let claim = claims.entry(key.clone()).or_default();
             claim.push_str(clause);
             claim.push('\n');
+        }
+        if ends_sentence {
+            current.clear();
+            current_holds_number = false;
         }
     }
     claims
@@ -546,6 +788,33 @@ fn a_vault_value_cannot_satisfy_another_limits_claim() {
     let error = check_vault_contract("synthetic-contract.md", &oversized)
         .expect_err("a `128 MiB` source limit contains `8 MiB` but is not 8 MiB");
     assert!(error.contains("`source-bytes`"), "{error}");
+}
+
+/// The exact shape that used to pass: the configuration claim says `128 KiB`, and
+/// the same sentence carries an unrelated clause with `256 KiB`. Attribution must
+/// stop at the first number a claim holds, so the unrelated `256 KiB` cannot
+/// satisfy a claim that states 128 KiB, and the reported claim is the limit's own
+/// sentence, not the rest of the document.
+#[test]
+fn an_unrelated_later_number_cannot_satisfy_a_wrong_claim() {
+    let text = "構文nesting 256。上限は1ファイル8 MiB。全入力64 MiB。\
+1 invocationあたりsource 10,000件。訪問entry 100,000件。\
+directory depth 128。\
+`verse.toml` / 各`.gitignore` 128 KiB, 計測用の固定入力は256 KiB。\
+exclude glob 256件・各4,096 bytes。\n";
+    let error = check_vault_contract("synthetic-contract.md", text)
+        .expect_err("a 128 KiB config claim must not pass because a later clause reads 256 KiB");
+    assert!(error.contains("`config-bytes`"), "{error}");
+    // The claim that failed is the limit's own text: the unrelated clause is not
+    // absorbed, and neither is the rest of the document.
+    assert!(error.contains("128 KiB"), "{error}");
+    assert!(!error.contains("exclude glob"), "{error}");
+    // The same document with the real 256 KiB value still passes, so the rule
+    // rejects the wrong number rather than every sentence with two quantities.
+    let fixed = text.replace("`.gitignore` 128 KiB", "`.gitignore` 256 KiB");
+    assert_ne!(fixed, text, "the fixture wording moved");
+    check_vault_contract("synthetic-contract.md", &fixed)
+        .expect("the documented config value must pass in the same sentence");
 }
 
 /// Every way a document may reasonably write this value.
