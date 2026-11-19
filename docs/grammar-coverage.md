@@ -31,6 +31,7 @@ The tool is an unreleased alpha and never replaces the UEFN compiler.
 | Indented object/array construction and anonymous field initializer `{Z := 5}` | Locally supported in tested shape | Self-authored nested-construction regression |
 | Map literal `map{"x" => 1}` | Unsupported by pinned grammar, exit 2 | Expanded corpus and parser probe |
 | Top-level inline binary function body `Add(X:int,Y:int):int = X+Y` | Reject same-line sibling ambiguity; grammar otherwise mis-splits body | Expanded corpus; explicit guard in both tools |
+| Statement line starting with unary `+`/`-` after another expression, e.g. `X := A` then `-2 < A` | Refused, exit 2: newlines are not separators, so the grammar joins it as a binary operand | `reject-leading-unary-continuation` corpus case; guard regression in both tools |
 | Guard refusal that also contains a raw parse ERROR | Guard stays primary; the parse error is reported as a secondary failure with its offset and node kind | `tests/diagnostics-stage.rs`, self-authored fixtures |
 | String beginning with unescaped `#`, e.g. `A := "# text"` | Pinned scanner may misclassify; fails coverage checks, exit 2 | Linter rule investigation; never alter the literal to make it parse |
 | Malformed/unclosed input | Rejected, exit 2 | Recovery, delimiter, quote tests |
@@ -50,8 +51,8 @@ Before a public supported release, extend this table with fixture IDs, compiler
 build results and real-project validation. A passing parser probe is only an
 initial signal; it is not sufficient release evidence.
 
-`tests/fixtures/corpus.json` maps 89 named inputs to independent golden output or
-refusal (66 successes, 23 refusals). Categories include normal/boundary/rejection forms, rather than merely
+`tests/fixtures/corpus.json` maps 90 named inputs to independent golden output or
+refusal (66 successes, 24 refusals). Categories include normal/boundary/rejection forms, rather than merely
 counting whitespace permutations. Calls/index brackets are compacted only at
 CST-confirmed openers; this does not distinguish failable calls from indexing
 semantically. Fixed-seed tests additionally vary indent width, BOM, EOL and
