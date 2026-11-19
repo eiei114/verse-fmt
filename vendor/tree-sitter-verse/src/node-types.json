@@ -845,6 +845,72 @@
     }
   },
   {
+    "type": "else_if_clause",
+    "named": true,
+    "fields": {
+      "alternative": {
+        "multiple": false,
+        "required": false,
+        "types": [
+          {
+            "type": "brace_block",
+            "named": true
+          },
+          {
+            "type": "colon_block",
+            "named": true
+          },
+          {
+            "type": "dot_block",
+            "named": true
+          },
+          {
+            "type": "else_if_clause",
+            "named": true
+          }
+        ]
+      },
+      "condition": {
+        "multiple": false,
+        "required": false,
+        "types": [
+          {
+            "type": "if_block_condition",
+            "named": true
+          }
+        ]
+      },
+      "consequence": {
+        "multiple": false,
+        "required": false,
+        "types": [
+          {
+            "type": "brace_block",
+            "named": true
+          },
+          {
+            "type": "colon_block",
+            "named": true
+          },
+          {
+            "type": "dot_block",
+            "named": true
+          }
+        ]
+      }
+    },
+    "children": {
+      "multiple": false,
+      "required": false,
+      "types": [
+        {
+          "type": "if_expression",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
     "type": "enum_definition",
     "named": true,
     "fields": {
@@ -1513,6 +1579,10 @@
           },
           {
             "type": "dot_block",
+            "named": true
+          },
+          {
+            "type": "else_if_clause",
             "named": true
           }
         ]

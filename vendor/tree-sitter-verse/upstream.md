@@ -85,3 +85,8 @@ that would attach to a previous expression across these newly accepted boundarie
 Call arguments admit unambiguous array types (`[]T`) and the bare `logic`
 type keyword. `logic{...}` still parses as a logic expression, and the
 archetype keeps its call-shaped head and braced body.
+
+An indented `if: … then:` and parenthesized `if (...):` can share an
+`else if` chain. Mixed alternatives preserve the condition/body ownership
+and the following sibling. The linter marks mixed-clause semantic coverage
+incomplete.

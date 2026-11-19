@@ -1042,6 +1042,53 @@ mod tests {
     }
 
     #[test]
+    fn mixed_else_if_chains_preserve_alternative_and_sibling_ownership() {
+        let text = "F():void=\n  if:\n    Ready?\n  then:\n    Start()\n  else if (Delay > 0):\n    Retry()\n  else if:\n    Expired?\n  then:\n    Stop()\n  else:\n    Wait()\n  Done()\n";
+        let (_, _) = parsed(text);
+        let mut parser = Parser::new();
+        // SAFETY: same statically linked grammar as production.
+        parser
+            .set_language(&Language::new(unsafe {
+                LanguageFn::from_raw(tree_sitter_verse)
+            }))
+            .unwrap();
+        let tree = parser.parse(text, None).unwrap();
+        let root = tree.root_node();
+        let body = root
+            .named_child(0)
+            .unwrap()
+            .child_by_field_name("body")
+            .unwrap();
+        assert_eq!(body.named_child_count(), 2);
+        let condition = body.named_child(0).unwrap();
+        assert_eq!(condition.kind(), "if_expression");
+        let alternative = condition.child_by_field_name("alternative").unwrap();
+        assert_eq!(alternative.kind(), "else_if_clause");
+        let middle = alternative.named_child(0).unwrap();
+        assert_eq!(
+            middle.child_by_field_name("condition").unwrap().kind(),
+            "if_condition"
+        );
+        let final_branch = middle.child_by_field_name("alternative").unwrap();
+        assert_eq!(final_branch.kind(), "else_if_clause");
+        assert_eq!(
+            final_branch
+                .child_by_field_name("condition")
+                .unwrap()
+                .kind(),
+            "if_block_condition"
+        );
+        assert_eq!(
+            final_branch
+                .child_by_field_name("alternative")
+                .unwrap()
+                .kind(),
+            "colon_block"
+        );
+        assert_eq!(body.named_child(1).unwrap().kind(), "call_expression");
+    }
+
+    #[test]
     fn for_filter_binding_owns_its_value_and_keeps_body_separate() {
         let text =
             "F():void =\n    for (I -> S : Ss, U := Us[I], U > 0):\n        G(S, U)\n    H()\n";

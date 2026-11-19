@@ -921,7 +921,10 @@ module.exports = grammar({
           ')',
           field('consequence', $._control_block),
           repeat(seq('else', 'if', '(', field('condition', $.if_condition), ')', field('consequence', $._control_block))),
-          optional(seq('else', field('alternative', $._control_block))),
+          optional(seq('else', field('alternative', choice(
+            $._control_block,
+            alias($._indented_else_if_clause, $.else_if_clause),
+          )))),
         ),
         seq(
           '(',
@@ -931,16 +934,22 @@ module.exports = grammar({
           field('consequence', $._expression),
           optional(seq('else', field('alternative', $._expression))),
         ),
-        seq(
-          ':',
-          $._indent,
-          field('condition', $.if_block_condition),
-          $._dedent,
-          'then',
-          field('consequence', $._control_block),
-          optional(seq('else', field('alternative', $._control_block))),
-        ),
+        $._indented_if_body,
       ),
+    )),
+
+    else_if_clause: $ => $.if_expression,
+
+    _indented_else_if_clause: $ => prec.right(seq('if', $._indented_if_body)),
+
+    _indented_if_body: $ => prec.right(seq(
+      ':',
+      $._indent,
+      field('condition', $.if_block_condition),
+      $._dedent,
+      'then',
+      field('consequence', $._control_block),
+      optional(seq('else', field('alternative', choice($._control_block, $.else_if_clause)))),
     )),
 
     if_condition: $ => seq(
