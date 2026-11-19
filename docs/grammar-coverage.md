@@ -46,6 +46,7 @@ The tool is an unreleased alpha and never replaces the UEFN compiler.
 | Braced comma-separated and indented `option` expressions | Locally supported; ambiguous postfix continuations refused | `option-block-and-comma-list` corpus case and CST tests |
 | Array and `logic` type arguments in archetype heads | Locally supported | `archetype-array-and-logic-arguments` corpus case and CST tests |
 | Mixed parenthesized and indented `else if` clauses | Locally supported | `mixed-else-if-chain` corpus case and CST tests |
+| Empty indented case arm before an outer sibling | Locally supported; enclosing dedents are retained | `empty-case-arm-before-dedent` corpus case and CST tests |
 | Malformed/unclosed input | Rejected, exit 2 | Recovery, delimiter, quote tests |
 | Mixed LF/CRLF | Preserved exactly in `preserve`; forced conversion follows protected-span policy | Source and CLI tests |
 | Bare CR, UTF-16, invalid UTF-8, NUL | Rejected, exit 2 | Source and CLI tests |
@@ -63,8 +64,8 @@ Before a public supported release, extend this table with fixture IDs, compiler
 build results and real-project validation. A passing parser probe is only an
 initial signal; it is not sufficient release evidence.
 
-`tests/fixtures/corpus.json` maps 105 named inputs to independent golden output or
-refusal (81 successes, 24 refusals). Categories include normal/boundary/rejection forms, rather than merely
+`tests/fixtures/corpus.json` maps 106 named inputs to independent golden output or
+refusal (82 successes, 24 refusals). Categories include normal/boundary/rejection forms, rather than merely
 counting whitespace permutations. Calls/index brackets are compacted only at
 CST-confirmed openers; this does not distinguish failable calls from indexing
 semantically. Fixed-seed tests additionally vary indent width, BOM, EOL and

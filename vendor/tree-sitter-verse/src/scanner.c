@@ -307,10 +307,19 @@ static bool scan(Scanner *s, TSLexer *lexer, const bool *valid_symbols) {
      Without pending_dedents, the `lookahead != '\n'` guard would return false
      and DEDENT would never fire, causing infinite nesting. */
   if (col <= prev && valid_symbols[INDENT]) {
+    uint32_t outer_size = s->stack_size;
     if (s->stack_size < MAX_INDENT) {
       s->indent_stack[s->stack_size++] = prev + 1;
     }
     s->pending_dedents = 1;
+    /* The newline has already been consumed. Queue the caller's dedents
+       too, before the scanner reaches the next statement at column col. */
+    if (col < prev) {
+      s->last_stmt_col = col;
+      for (uint32_t i = outer_size; i > 0 && s->indent_stack[i - 1] > col; i--) {
+        s->pending_dedents++;
+      }
+    }
     lexer->result_symbol = INDENT;
     return true;
   }

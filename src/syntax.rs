@@ -85,6 +85,26 @@ fn empty_archetype_brace_continuation(
 const INDENTED_EXPRESSION_BOUNDARY_MESSAGE: &str =
     "ambiguous clause boundary or line-leading postfix continuation";
 
+fn ends_with_empty_case_arm(node: tree_sitter::Node<'_>) -> bool {
+    if node.kind() != "case_expression" {
+        return false;
+    }
+    let mut cursor = node.walk();
+    let Some(body) = node
+        .named_children(&mut cursor)
+        .filter(|child| child.kind() == "case_arm")
+        .last()
+        .and_then(|arm| arm.child_by_field_name("body"))
+        .filter(|body| body.kind() == "indented_block")
+    else {
+        return false;
+    };
+    let mut cursor = body.walk();
+    !body
+        .named_children(&mut cursor)
+        .any(|child| !child.is_extra())
+}
+
 fn ambiguous_expression_boundary(
     node: tree_sitter::Node<'_>,
     bytes: &[u8],
@@ -121,6 +141,7 @@ fn ambiguous_expression_boundary(
     };
     let left = node.child_by_field_name(field)?;
     if !in_checked_block
+        && !ends_with_empty_case_arm(left)
         && !left
             .child_by_field_name("clauses")
             .is_some_and(|clauses| clauses.kind() == "for_block_clause_list")
@@ -1086,6 +1107,60 @@ mod tests {
             "colon_block"
         );
         assert_eq!(body.named_child(1).unwrap().kind(), "call_expression");
+    }
+
+    #[test]
+    fn an_empty_case_arm_refuses_a_next_line_index_or_brace() {
+        for tail in ["[0]", "{Value := 1}"] {
+            let text = format!(
+                "F():void =\n    case(Mode):\n        0 => Use()\n        _ =>\n    {tail}\n"
+            );
+            let source = Source::from_bytes(text.as_bytes()).unwrap();
+            let error = Document::parse(&source).unwrap_err();
+            assert!(
+                error.message.contains(INDENTED_EXPRESSION_BOUNDARY_MESSAGE),
+                "{tail}: {error:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn empty_case_arm_closes_before_an_outer_sibling() {
+        let text = "Parcel := module{\nCrate := class:\n    Start():void =\n        case(Mode):\n            0 => Use()\n            _ =>\n\n    Stop():void =\n        Finish()\n}\n";
+        let (_, _) = parsed(text);
+        let mut parser = Parser::new();
+        // SAFETY: same statically linked grammar as production.
+        parser
+            .set_language(&Language::new(unsafe {
+                LanguageFn::from_raw(tree_sitter_verse)
+            }))
+            .unwrap();
+        let tree = parser.parse(text, None).unwrap();
+        let root = tree.root_node();
+        let module = root
+            .named_child(0)
+            .unwrap()
+            .child_by_field_name("value")
+            .unwrap();
+        let class = module
+            .named_child(0)
+            .unwrap()
+            .child_by_field_name("value")
+            .unwrap();
+        assert_eq!(class.named_child_count(), 2);
+        let body = class
+            .named_child(0)
+            .unwrap()
+            .child_by_field_name("body")
+            .unwrap();
+        let case = body.named_child(0).unwrap();
+        assert_eq!(case.kind(), "case_expression");
+        let arm = case.named_child(2).unwrap();
+        let empty = arm.child_by_field_name("body").unwrap();
+        assert_eq!(empty.kind(), "indented_block");
+        assert_eq!(empty.named_child_count(), 0);
+        let next = class.named_child(1).unwrap();
+        assert_eq!(next.kind(), "function_definition");
     }
 
     #[test]

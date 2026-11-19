@@ -90,3 +90,7 @@ An indented `if: … then:` and parenthesized `if (...):` can share an
 `else if` chain. Mixed alternatives preserve the condition/body ownership
 and the following sibling. The linter marks mixed-clause semantic coverage
 incomplete.
+
+An empty indented block can end at the same newline as its enclosing blocks.
+The scanner queues the enclosing dedents along with the phantom block's
+dedent, keeping the first following statement in its outer scope.
