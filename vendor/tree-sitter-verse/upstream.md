@@ -105,3 +105,7 @@ call stays unsupported because of the possible attachment to that call.
 
 An indented `for` header can contain a `set` clause after its iterator.
 The header retains the assignment and its operator.
+
+When an indented for header starts with `Item : Read(Values)`, the adjacent
+opener keeps the call inside the first iterator. The clause boundary guard
+continues to reject a postfix attached across a newline.

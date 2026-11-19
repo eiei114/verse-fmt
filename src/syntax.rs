@@ -1268,6 +1268,42 @@ mod tests {
     }
 
     #[test]
+    fn an_adjacent_call_stays_inside_the_first_indented_iterator() {
+        let text = "F():void=\n    for:\n        Item : Fetch(Values)\n        not Seen[Item]\n        set Marks[Item] += array{Item}\n    do:\n        Use(Item)\n";
+        let (_, _) = parsed(text);
+        let mut parser = Parser::new();
+        // SAFETY: same statically linked grammar as production.
+        parser
+            .set_language(&Language::new(unsafe {
+                LanguageFn::from_raw(tree_sitter_verse)
+            }))
+            .unwrap();
+        let tree = parser.parse(text, None).unwrap();
+        let root = tree.root_node();
+        let body = root
+            .named_child(0)
+            .unwrap()
+            .child_by_field_name("body")
+            .unwrap();
+        let expression = body.named_child(0).unwrap();
+        let clauses = expression.child_by_field_name("clauses").unwrap();
+        assert_eq!(clauses.named_child_count(), 3);
+        let iterator = clauses.named_child(0).unwrap();
+        assert_eq!(iterator.kind(), "for_iterator");
+        let iterable = iterator.child_by_field_name("iterable").unwrap();
+        assert_eq!(iterable.kind(), "call_expression");
+        assert_eq!(
+            iterable
+                .child_by_field_name("function")
+                .unwrap()
+                .utf8_text(text.as_bytes())
+                .unwrap(),
+            "Fetch"
+        );
+        assert_eq!(clauses.named_child(1).unwrap().kind(), "unary_expression");
+    }
+
+    #[test]
     fn for_filter_binding_owns_its_value_and_keeps_body_separate() {
         let text =
             "F():void =\n    for (I -> S : Ss, U := Us[I], U > 0):\n        G(S, U)\n    H()\n";

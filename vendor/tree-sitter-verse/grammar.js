@@ -991,9 +991,24 @@ module.exports = grammar({
     ),
 
     for_block_clause_list: $ => seq(
-      $.for_iterator,
+      choice($.for_iterator, alias($._for_block_call_iterator, $.for_iterator)),
       optional(','),
       repeat(seq(choice($._for_clause, $.for_filter_binding, $.set_statement), optional(','))),
+    ),
+
+    // An adjacent opener belongs to the iterable's call. A newline never
+    // receives this preference, and the adapter still checks clause boundaries.
+    _for_block_call_iterator: $ => prec.dynamic(1, seq(
+      field('variable', $.identifier),
+      ':',
+      field('iterable', alias($._for_block_iterable_call, $.call_expression)),
+    )),
+
+    _for_block_iterable_call: $ => seq(
+      field('function', $.identifier),
+      token.immediate('('),
+      optional(field('arguments', $.argument_list)),
+      ')',
     ),
 
     for_clause_list: $ => seq(
