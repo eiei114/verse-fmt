@@ -65,3 +65,7 @@ An indented archetype may omit all field initializers. Its scanner
 indent/dedent pair still encloses the archetype and keeps following statements
 at their original scope. The syntax adapter refuses a next-line brace
 that the parser attaches to an empty archetype as another construction.
+
+Nonempty map literals reuse the `map_literal` and `map_entry` rules
+from verse-lint's `94acbac`. An entry-less `map{}` retains its existing
+archetype node.

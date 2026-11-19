@@ -2,6 +2,7 @@
   "schemaVersion": 1,
   "provenance": "Self-authored verse-fmt cases; MIT OR Apache-2.0; tool/parser expectations only, UEFN acceptance pending.",
   "cases": [
+    {"id":"map-literal-pairs", "category":"collection", "input":"F():void=\n  Pairs:=map{Key => Value,Other => 2}\n  Empty:=map{}\n  G ()\n", "expected":"F():void =\n    Pairs := map{Key => Value, Other => 2}\n    Empty := map{}\n    G()\n"},
     {"id":"empty-indented-archetype", "category":"collection", "input":"F():item=\n  A:item=item:\n  B:item=item:\n    Count:=1\n  return A\n", "expected":"F():item =\n    A:item = item:\n    B:item = item:\n        Count := 1\n    return A\n"},
     {"id":"space-before-function-effects", "category":"specifier", "input":"F (N : int) <transacts><decides> : int=\n  N\n", "expected":"F(N:int) <transacts><decides>:int =\n    N\n"},
     {"id":"indented-enum-commas", "category":"declaration", "input":"shade:=enum:\n  Light,\n  Grey\n  Dark,\nNext:int=1\n", "expected":"shade := enum:\n    Light,\n    Grey\n    Dark,\nNext:int = 1\n"},
@@ -39,7 +40,7 @@
     {"id":"failable-call", "category":"expression", "input":"A:=Foo [ 1 ]\n", "expected":"A := Foo[1]\n"},
     {"id":"member-access", "category":"expression", "input":"A:=Item.Value\n", "expected":"A := Item.Value\n"},
     {"id":"array", "category":"collection", "input":"A:=array{1,2,3}\n", "expected":"A := array{1, 2, 3}\n"},
-    {"id":"reject-map-literal", "category":"coverage", "input":"A:=map{\"x\" => 1}\n", "reject":true},
+    {"id":"map-literal-string-key", "category":"collection", "input":"A:=map{\"x\" => 1}\n", "expected":"A := map{\"x\" => 1}\n"},
     {"id":"option", "category":"collection", "input":"A:=option{1}\n", "expected":"A := option{1}\n"},
     {"id":"tuple", "category":"collection", "input":"A:=(1,2)\n", "expected":"A := (1, 2)\n"},
     {"id":"module", "category":"declaration", "input":"M:=module:\n  A:=1\n", "expected":"M := module:\n    A := 1\n"},

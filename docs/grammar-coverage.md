@@ -27,6 +27,7 @@ The tool is an unreleased alpha and never replaces the UEFN compiler.
 | Multi-line `if:` condition block (bindings, `set`, `not`, comparisons, one per line) | Locally supported | `if-block-multi-condition` corpus case; CST item-ownership test |
 | `case` arm with indented statement block or `{ ... }` body | Locally supported; `=>` spacing preserved | `case-arm-block-bodies` corpus case; CST body-ownership test |
 | Indented `spawn:` with one expression | Locally supported | `indented-spawn` corpus case; CST body-ownership test |
+| Nonempty map literal with `=>` entries | Locally supported | `map-literal-pairs` corpus case; CST ownership test |
 | Empty indented archetype | Locally supported; ambiguous next-line braces refused | `empty-indented-archetype` corpus case; CST ownership test |
 | Whitespace before function effects | Locally supported | `space-before-function-effects` corpus case; CST ownership test |
 | Indented enum with variant commas | Locally supported | `indented-enum-commas` corpus case; CST ownership test |
@@ -36,7 +37,6 @@ The tool is an unreleased alpha and never replaces the UEFN compiler.
 | Failable set assignment in an if condition | Locally supported in tested indexed-target form | Self-authored parser ownership and golden regression |
 | Key/value iterator `for (Key -> Value : Values)` | Locally supported in tested form | Self-authored iterator-field and golden regression |
 | Indented object/array construction and anonymous field initializer `{Z := 5}` | Locally supported in tested shape | Self-authored nested-construction regression |
-| Map literal `map{"x" => 1}` | Unsupported by pinned grammar, exit 2 | Expanded corpus and parser probe |
 | Top-level inline binary function body `Add(X:int,Y:int):int = X+Y` | Reject same-line sibling ambiguity; grammar otherwise mis-splits body | Expanded corpus; explicit guard in both tools |
 | Statement line starting with unary `+`/`-` after another expression, e.g. `X := A` then `-2 < A` | Refused, exit 2: newlines are not separators, so the grammar joins it as a binary operand | `reject-leading-unary-continuation` corpus case; guard regression in both tools |
 | Guard refusal that also contains a raw parse ERROR | Guard stays primary; the parse error is reported as a secondary failure with its offset and node kind | `tests/diagnostics-stage.rs`, self-authored fixtures |
@@ -58,8 +58,8 @@ Before a public supported release, extend this table with fixture IDs, compiler
 build results and real-project validation. A passing parser probe is only an
 initial signal; it is not sufficient release evidence.
 
-`tests/fixtures/corpus.json` maps 98 named inputs to independent golden output or
-refusal (74 successes, 24 refusals). Categories include normal/boundary/rejection forms, rather than merely
+`tests/fixtures/corpus.json` maps 99 named inputs to independent golden output or
+refusal (76 successes, 23 refusals). Categories include normal/boundary/rejection forms, rather than merely
 counting whitespace permutations. Calls/index brackets are compacted only at
 CST-confirmed openers; this does not distinguish failable calls from indexing
 semantically. Fixed-seed tests additionally vary indent width, BOM, EOL and

@@ -1000,6 +1000,55 @@ mod tests {
     }
 
     #[test]
+    fn map_pairs_keep_their_keys_values_and_following_statement() {
+        let text =
+            "F():void =\n    Pairs := map{Key => Value, Other => 2}\n    Empty := map{}\n    G()\n";
+        let (_, _) = parsed(text);
+        let mut parser = Parser::new();
+        // SAFETY: same statically linked grammar as production.
+        let language = Language::new(unsafe { LanguageFn::from_raw(tree_sitter_verse) });
+        parser.set_language(&language).unwrap();
+        let tree = parser.parse(text, None).unwrap();
+        let root = tree.root_node();
+        assert!(!root.has_error());
+
+        let body = root
+            .named_child(0)
+            .unwrap()
+            .child_by_field_name("body")
+            .unwrap();
+        assert_eq!(body.named_child_count(), 3);
+        let pairs = body
+            .named_child(0)
+            .unwrap()
+            .child_by_field_name("value")
+            .unwrap();
+        assert_eq!(pairs.kind(), "map_literal");
+        assert_eq!(pairs.named_child_count(), 3);
+        for (index, key, value) in [(1, "Key", "Value"), (2, "Other", "2")] {
+            let entry = pairs.named_child(index).unwrap();
+            assert_eq!(entry.kind(), "map_entry");
+            for (field, expected) in [("key", key), ("value", value)] {
+                assert_eq!(
+                    entry
+                        .child_by_field_name(field)
+                        .unwrap()
+                        .utf8_text(text.as_bytes())
+                        .unwrap(),
+                    expected
+                );
+            }
+        }
+        let empty = body
+            .named_child(1)
+            .unwrap()
+            .child_by_field_name("value")
+            .unwrap();
+        assert_eq!(empty.kind(), "object_construction");
+        assert_eq!(body.named_child(2).unwrap().kind(), "call_expression");
+    }
+
+    #[test]
     fn guards_recovery_and_unsupported_constructs() {
         for text in [
             "<# missing",
@@ -1014,7 +1063,7 @@ mod tests {
             "shade := enum{Light,,Dark}\n",
             "shade := enum{,Light}\n",
             "Add(X:int,Y:int):int = X+Y\n",
-            "A := map{\"x\" => 1}\n",
+            "A := map{\"x\" => }\n",
         ] {
             let source = Source::from_bytes(text.as_bytes()).unwrap();
             assert!(Document::parse(&source).is_err(), "{text}");
