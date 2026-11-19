@@ -896,6 +896,38 @@ mod tests {
     }
 
     #[test]
+    fn mutable_fields_accept_both_initializer_spellings() {
+        let text = "Parcel := module{\nCrate := class:\n  @editable\n  var Slots:[]int:=array{}\n  var Count:int=0\n}\n";
+        let (_, _) = parsed(text);
+        let mut parser = Parser::new();
+        // SAFETY: same statically linked grammar as production.
+        parser
+            .set_language(&Language::new(unsafe {
+                LanguageFn::from_raw(tree_sitter_verse)
+            }))
+            .unwrap();
+        let tree = parser.parse(text, None).unwrap();
+        let root = tree.root_node();
+        let definition = root
+            .named_child(0)
+            .unwrap()
+            .child_by_field_name("value")
+            .unwrap();
+        assert_eq!(definition.kind(), "module_definition");
+        let class = definition
+            .named_child(0)
+            .unwrap()
+            .child_by_field_name("value")
+            .unwrap();
+        assert_eq!(class.kind(), "class_definition");
+        for (index, value) in [(1, "array_literal"), (2, "integer_literal")] {
+            let variable = class.named_child(index).unwrap();
+            assert_eq!(variable.kind(), "var_declaration");
+            assert_eq!(variable.child_by_field_name("value").unwrap().kind(), value);
+        }
+    }
+
+    #[test]
     fn for_filter_binding_owns_its_value_and_keeps_body_separate() {
         let text =
             "F():void =\n    for (I -> S : Ss, U := Us[I], U > 0):\n        G(S, U)\n    H()\n";
