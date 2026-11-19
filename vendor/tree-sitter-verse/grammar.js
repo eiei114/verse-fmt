@@ -57,6 +57,7 @@ module.exports = grammar({
     [$.receiver_parameter, $.module_scoped_identifier, $._expression],
     [$.module_scoped_identifier, $._expression],
     [$._expression, $.for_iterator],
+    [$.for_filter_binding, $.for_iterator],
     [$._type, $.function_type, $.constrained_type],
     [$.type_definition, $.field_initializer],
   ],
@@ -934,7 +935,7 @@ module.exports = grammar({
 
     for_clause_list: $ => seq(
       $._for_clause,
-      repeat(seq(',', $._for_clause)),
+      repeat(seq(',', choice($._for_clause, $.for_filter_binding))),
     ),
 
     _for_clause: $ => choice(
@@ -942,13 +943,19 @@ module.exports = grammar({
       $._expression,
     ),
 
+    for_filter_binding: $ => seq(
+      field('name', $.identifier),
+      ':=',
+      field('value', $._expression),
+    ),
+
     for_iterator: $ => choice(
-      // Bounded range generator; ordinary := bindings are not iterators.
-      seq(
+      // Keep the range-generator reading when both := forms can match.
+      prec.dynamic(1, seq(
         field('variable', $.identifier),
         ':=',
         field('iterable', $.range_expression),
-      ),
+      )),
       seq(
         field('key', $.identifier),
         '->',

@@ -3,8 +3,8 @@
 The parser accepts `for (I := 1..3)` using a dedicated alternative whose
 iterable must be a `range_expression`. This is not a blanket addition of `:=`
 to all iterator separators. Intermediate bindings such as `Twice := I * 2`
-inside a header remain unsupported, as do non-range `I := Values` headers.
-These refusals describe tool coverage, not compiler invalidity.
+are accepted after the initial clause. A leading non-range `I := Values`
+still fails closed.
 
 ## Syntax evidence
 
@@ -23,7 +23,7 @@ the evidence was the live rendered documentation, not a pinned source capture.
   unary/additive/multiplicative grouping, ordered generators/filters, nested
   loop owners and post-loop/sibling-function separation.
 - CLI goldens cover compact input, parentheses, nested bodies and BOM/CRLF with
-  protected Unicode. Malformed bounds and unimplemented bindings still refuse.
+  protected Unicode. Malformed bounds and leading non-range bindings still refuse.
 - Scanner, lexical/CST/token/indentation checks and write adapter are unchanged.
   The existing formatting pass handles `:=`; no new whitespace heuristic.
 - Grammar C/JSON regenerated with Tree-sitter CLI 0.25.10, ABI15. Independent

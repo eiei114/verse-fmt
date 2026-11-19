@@ -728,6 +728,64 @@ mod tests {
     }
 
     #[test]
+    fn for_filter_binding_owns_its_value_and_keeps_body_separate() {
+        let text =
+            "F():void =\n    for (I -> S : Ss, U := Us[I], U > 0):\n        G(S, U)\n    H()\n";
+        let (_, _) = parsed(text);
+        let mut parser = Parser::new();
+        // SAFETY: same statically linked grammar as production.
+        let language = Language::new(unsafe { LanguageFn::from_raw(tree_sitter_verse) });
+        parser.set_language(&language).unwrap();
+        let tree = parser.parse(text, None).unwrap();
+        let root = tree.root_node();
+        assert!(!root.has_error());
+
+        let body = root
+            .named_child(0)
+            .unwrap()
+            .child_by_field_name("body")
+            .unwrap();
+        assert_eq!(body.named_child_count(), 2);
+        let loop_node = body.named_child(0).unwrap();
+        let clauses = loop_node.child_by_field_name("clauses").unwrap();
+        assert_eq!(clauses.named_child_count(), 3);
+        assert_eq!(clauses.named_child(0).unwrap().kind(), "for_iterator");
+        let binding = clauses.named_child(1).unwrap();
+        assert_eq!(binding.kind(), "for_filter_binding");
+        assert_eq!(
+            binding
+                .child_by_field_name("name")
+                .unwrap()
+                .utf8_text(text.as_bytes())
+                .unwrap(),
+            "U"
+        );
+        assert_eq!(
+            binding
+                .child_by_field_name("value")
+                .unwrap()
+                .utf8_text(text.as_bytes())
+                .unwrap(),
+            "Us[I]"
+        );
+        assert_eq!(clauses.named_child(2).unwrap().kind(), "binary_expression");
+        assert_eq!(
+            loop_node
+                .child_by_field_name("body")
+                .unwrap()
+                .named_child_count(),
+            1
+        );
+        assert_eq!(
+            body.named_child(1)
+                .unwrap()
+                .utf8_text(text.as_bytes())
+                .unwrap(),
+            "H()"
+        );
+    }
+
+    #[test]
     fn guards_recovery_and_unsupported_constructs() {
         for text in [
             "<# missing",
