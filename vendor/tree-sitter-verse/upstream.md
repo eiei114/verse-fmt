@@ -53,3 +53,6 @@ visible after their initializer in the loop's scope.
 Declarations with `<constructor>` can use parameters, effects and a
 `:=` archetype body. Ordinary parameterized `:=` definitions retain their
 existing CST ownership.
+
+Indented `enum:` bodies use the same variant list as braced enums, with
+optional commas between variants and after the final variant.

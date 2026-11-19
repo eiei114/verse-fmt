@@ -829,6 +829,41 @@ mod tests {
     }
 
     #[test]
+    fn commas_in_indented_enum_keep_variants_and_next_definition_separate() {
+        let text = "shade := enum:\n    Light,\n    Grey\n    Dark,\nNext:int = 1\n";
+        let (_, _) = parsed(text);
+        let mut parser = Parser::new();
+        // SAFETY: same statically linked grammar as production.
+        let language = Language::new(unsafe { LanguageFn::from_raw(tree_sitter_verse) });
+        parser.set_language(&language).unwrap();
+        let tree = parser.parse(text, None).unwrap();
+        let root = tree.root_node();
+        assert!(!root.has_error());
+
+        assert_eq!(root.named_child_count(), 2);
+        let variants = root
+            .named_child(0)
+            .unwrap()
+            .child_by_field_name("value")
+            .unwrap();
+        assert_eq!(variants.kind(), "enum_definition");
+        assert_eq!(variants.named_child_count(), 3);
+        for (index, name) in ["Light", "Grey", "Dark"].into_iter().enumerate() {
+            let variant = variants.named_child(index).unwrap();
+            assert_eq!(variant.kind(), "enum_variant");
+            assert_eq!(
+                variant
+                    .child_by_field_name("name")
+                    .unwrap()
+                    .utf8_text(text.as_bytes())
+                    .unwrap(),
+                name
+            );
+        }
+        assert_eq!(root.named_child(1).unwrap().kind(), "constant_declaration");
+    }
+
+    #[test]
     fn guards_recovery_and_unsupported_constructs() {
         for text in [
             "<# missing",

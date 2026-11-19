@@ -294,12 +294,14 @@ module.exports = grammar({
     ),
 
     _enum_body: $ => choice(
-      seq(':', $._indent, repeat($.enum_variant), $._dedent),
-      seq('{', optional(seq(
-        $.enum_variant,
-        repeat(seq(optional(','), $.enum_variant)),
-        optional(','),
-      )), '}'),
+      seq(':', $._indent, optional($._enum_variants), $._dedent),
+      seq('{', optional($._enum_variants), '}'),
+    ),
+
+    _enum_variants: $ => seq(
+      $.enum_variant,
+      repeat(seq(optional(','), $.enum_variant)),
+      optional(','),
     ),
 
     _class_member: $ => choice(
