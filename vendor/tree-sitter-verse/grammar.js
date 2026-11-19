@@ -962,10 +962,17 @@ module.exports = grammar({
 
     for_expression: $ => seq(
       'for',
-      '(',
-      field('clauses', $.for_clause_list),
-      ')',
+      choice(
+        seq('(', field('clauses', $.for_clause_list), ')'),
+        seq(':', $._indent, field('clauses', $.for_block_clause_list), $._dedent, 'do'),
+      ),
       field('body', $._control_block),
+    ),
+
+    for_block_clause_list: $ => seq(
+      $.for_iterator,
+      optional(','),
+      repeat(seq(choice($._for_clause, $.for_filter_binding), optional(','))),
     ),
 
     for_clause_list: $ => seq(

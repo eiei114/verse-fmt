@@ -41,6 +41,7 @@ The tool is an unreleased alpha and never replaces the UEFN compiler.
 | Statement line starting with unary `+`/`-` after another expression, e.g. `X := A` then `-2 < A` | Refused, exit 2: newlines are not separators, so the grammar joins it as a binary operand | `reject-leading-unary-continuation` corpus case; guard regression in both tools |
 | Guard refusal that also contains a raw parse ERROR | Guard stays primary; the parse error is reported as a secondary failure with its offset and node kind | `tests/diagnostics-stage.rs`, self-authored fixtures |
 | String beginning with unescaped `#`, e.g. `A := "# text"` | Pinned scanner may misclassify; fails coverage checks, exit 2 | Linter rule investigation; never alter the literal to make it parse |
+| `for: … do:` | Locally supported; ambiguous clause boundaries refused | `indented-for-do` corpus case and CST tests |
 | Malformed/unclosed input | Rejected, exit 2 | Recovery, delimiter, quote tests |
 | Mixed LF/CRLF | Preserved exactly in `preserve`; forced conversion follows protected-span policy | Source and CLI tests |
 | Bare CR, UTF-16, invalid UTF-8, NUL | Rejected, exit 2 | Source and CLI tests |
@@ -58,8 +59,8 @@ Before a public supported release, extend this table with fixture IDs, compiler
 build results and real-project validation. A passing parser probe is only an
 initial signal; it is not sufficient release evidence.
 
-`tests/fixtures/corpus.json` maps 99 named inputs to independent golden output or
-refusal (76 successes, 23 refusals). Categories include normal/boundary/rejection forms, rather than merely
+`tests/fixtures/corpus.json` maps 101 named inputs to independent golden output or
+refusal (77 successes, 24 refusals). Categories include normal/boundary/rejection forms, rather than merely
 counting whitespace permutations. Calls/index brackets are compacted only at
 CST-confirmed openers; this does not distinguish failable calls from indexing
 semantically. Fixed-seed tests additionally vary indent width, BOM, EOL and

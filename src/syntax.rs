@@ -82,6 +82,61 @@ fn empty_archetype_brace_continuation(
         .then_some(source.body_start() + brace.start_byte())
 }
 
+const FOR_CLAUSE_BOUNDARY_MESSAGE: &str =
+    "ambiguous clause boundary or postfix continuation in an indented for expression";
+
+fn ambiguous_for_clause_boundary(
+    node: tree_sitter::Node<'_>,
+    bytes: &[u8],
+    in_header: bool,
+) -> Option<usize> {
+    if node.kind() == "for_block_clause_list" {
+        let mut cursor = node.walk();
+        let mut previous = None::<tree_sitter::Node<'_>>;
+        for child in node.children(&mut cursor).filter(|child| !child.is_extra()) {
+            if child.kind() == "," {
+                previous = None;
+            } else {
+                if let Some(left) = previous {
+                    let left_text = bytes[left.byte_range()].trim_ascii_end();
+                    let end = left.start_byte() + left_text.len();
+                    if !bytes[end..child.start_byte()].contains(&b'\n') {
+                        return Some(child.start_byte());
+                    }
+                }
+                previous = Some(child);
+            }
+        }
+        return None;
+    }
+    // The pinned grammar can attach the start of the next clause to a
+    // previous expression as a postfix. Check the operator's own source span
+    // so parentheses inside an explicitly delimited argument stay supported.
+    let (field, opener) = match node.kind() {
+        "call_expression" => ("function", "("),
+        "failable_call_expression" => ("function", "["),
+        "index_expression" => ("object", "["),
+        "object_construction" | "map_literal" => ("type", "{"),
+        _ => return None,
+    };
+    let left = node.child_by_field_name(field)?;
+    if !in_header
+        && !left
+            .child_by_field_name("clauses")
+            .is_some_and(|clauses| clauses.kind() == "for_block_clause_list")
+    {
+        return None;
+    }
+    let mut cursor = node.walk();
+    let next = node
+        .children(&mut cursor)
+        .find(|child| child.kind() == opener)?;
+    let end = left.start_byte() + bytes[left.byte_range()].trim_ascii_end().len();
+    bytes[end..next.start_byte()]
+        .contains(&b'\n')
+        .then_some(next.start_byte())
+}
+
 impl Document {
     /// Parse without collecting a trace; the crate's own tests use this, the
     /// binary always needs the trace that `--explain` prints.
@@ -191,6 +246,7 @@ impl Document {
             .collect();
         let mut cursor = tree.walk();
         let mut depth = 0;
+        let mut for_header_depth = None;
         loop {
             let node = cursor.node();
             if node.kind() == "block_comment" {
@@ -224,6 +280,18 @@ impl Document {
                         "binary `+`/`-` operator starts a new line; a leading unary operand is ambiguous with a continued expression in the pinned grammar",
                     ));
                 }
+            }
+            if node.kind() == "for_block_clause_list" && for_header_depth.is_none() {
+                for_header_depth = Some(depth);
+            }
+            if guard.is_none()
+                && let Some(offset) =
+                    ambiguous_for_clause_boundary(node, bytes, for_header_depth.is_some())
+            {
+                guard = Some(Failure::guarded(
+                    source.body_start() + offset,
+                    FOR_CLAUSE_BOUNDARY_MESSAGE,
+                ));
             }
             if guard.is_none()
                 && let Some(start) = empty_archetype_brace_continuation(node, source)
@@ -313,6 +381,9 @@ impl Document {
             loop {
                 if fingerprint {
                     shape.push((cursor.node().kind_id(), false));
+                }
+                if for_header_depth == Some(depth) {
+                    for_header_depth = None;
                 }
                 if cursor.goto_next_sibling() {
                     break;
@@ -758,6 +829,70 @@ mod tests {
         assert_eq!(arguments.named_child_count(), 1);
         assert_eq!(arguments.named_child(0).unwrap().kind(), "tuple_type");
         assert_eq!(class.named_child(1).unwrap().kind(), "field_declaration");
+    }
+
+    #[test]
+    fn indented_for_retains_clauses_body_and_sibling() {
+        let text = "F():void=\n    for:\n        Key -> Item : Items\n        Choice := Pick[Key]\n        Choice > 0\n    do:\n        Use(Item, Choice)\n    Done()\n";
+        let (_, _) = parsed(text);
+        let mut parser = Parser::new();
+        // SAFETY: same statically linked grammar as production.
+        parser
+            .set_language(&Language::new(unsafe {
+                LanguageFn::from_raw(tree_sitter_verse)
+            }))
+            .unwrap();
+        let tree = parser.parse(text, None).unwrap();
+        let root = tree.root_node();
+        let body = root
+            .named_child(0)
+            .unwrap()
+            .child_by_field_name("body")
+            .unwrap();
+        assert_eq!(body.named_child_count(), 2);
+        let expression = body.named_child(0).unwrap();
+        assert_eq!(expression.kind(), "for_expression");
+        let clauses = expression.child_by_field_name("clauses").unwrap();
+        assert_eq!(clauses.kind(), "for_block_clause_list");
+        let mut cursor = clauses.walk();
+        assert_eq!(
+            clauses
+                .named_children(&mut cursor)
+                .map(|child| child.kind())
+                .collect::<Vec<_>>(),
+            ["for_iterator", "for_filter_binding", "binary_expression"]
+        );
+        assert_eq!(
+            expression.child_by_field_name("body").unwrap().kind(),
+            "colon_block"
+        );
+        assert_eq!(body.named_child(1).unwrap().kind(), "call_expression");
+    }
+
+    #[test]
+    fn indented_for_refuses_ambiguous_clause_boundaries() {
+        for joined in ["(0)", "[0]", "{Value := 0}"] {
+            let text = format!(
+                "F():void =\n    for:\n        Item : Items\n        {joined}\n    do:\n        Use(Item)\n"
+            );
+            let source = Source::from_bytes(text.as_bytes()).unwrap();
+            let error = Document::parse(&source).unwrap_err();
+            assert!(
+                error.message.contains(FOR_CLAUSE_BOUNDARY_MESSAGE),
+                "{joined}: {error:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn indented_for_result_refuses_next_line_index() {
+        let text = "F():void =\n    Selection := for:\n        Item : Items\n    do:\n        Item\n    [0]\n";
+        let source = Source::from_bytes(text.as_bytes()).unwrap();
+        let error = Document::parse(&source).unwrap_err();
+        assert!(
+            error.message.contains(FOR_CLAUSE_BOUNDARY_MESSAGE),
+            "{error:?}"
+        );
     }
 
     #[test]

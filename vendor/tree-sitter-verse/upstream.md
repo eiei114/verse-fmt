@@ -69,3 +69,8 @@ that the parser attaches to an empty archetype as another construction.
 Nonempty map literals reuse the `map_literal` and `map_entry` rules
 from verse-lint's `94acbac`. An entry-less `map{}` retains its existing
 archetype node.
+
+Indented `for: … do:` headers begin with an iterator. Later clauses reuse the
+parenthesized iterator and filter-binding nodes. A guard rejects same-line
+clauses without a comma and line-leading postfix openers that would otherwise
+be absorbed by the preceding expression. The same check covers a postfix on\na new line after the loop result. Loop bindings stay in the loop scope.

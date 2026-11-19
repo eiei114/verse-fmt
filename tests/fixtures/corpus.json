@@ -2,6 +2,8 @@
   "schemaVersion": 1,
   "provenance": "Self-authored verse-fmt cases; MIT OR Apache-2.0; tool/parser expectations only, UEFN acceptance pending.",
   "cases": [
+    {"id": "indented-for-do","category": "control","input": "F():void=\n    for:\n        Key -> Item : Items\n        Choice := Pick[Key]\n        Choice > 0\n    do:\n        Use(Item, Choice)\n    Done()\n","expected": "F():void =\n    for:\n        Key -> Item : Items\n        Choice := Pick[Key]\n        Choice > 0\n    do:\n        Use(Item, Choice)\n    Done()\n"},
+    {"id": "reject-indented-for-absorbed-call","category": "rejection","input": "F():void =\n    for:\n        Item : Items\n        (0)\n    do:\n        Use(Item)\n","reject": true},
     {"id":"map-literal-pairs", "category":"collection", "input":"F():void=\n  Pairs:=map{Key => Value,Other => 2}\n  Empty:=map{}\n  G ()\n", "expected":"F():void =\n    Pairs := map{Key => Value, Other => 2}\n    Empty := map{}\n    G()\n"},
     {"id":"empty-indented-archetype", "category":"collection", "input":"F():item=\n  A:item=item:\n  B:item=item:\n    Count:=1\n  return A\n", "expected":"F():item =\n    A:item = item:\n    B:item = item:\n        Count := 1\n    return A\n"},
     {"id":"space-before-function-effects", "category":"specifier", "input":"F (N : int) <transacts><decides> : int=\n  N\n", "expected":"F(N:int) <transacts><decides>:int =\n    N\n"},

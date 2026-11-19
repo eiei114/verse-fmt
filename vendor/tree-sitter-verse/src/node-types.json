@@ -1113,6 +1113,29 @@
     }
   },
   {
+    "type": "for_block_clause_list",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": true,
+      "types": [
+        {
+          "type": "_expression",
+          "named": true
+        },
+        {
+          "type": "for_filter_binding",
+          "named": true
+        },
+        {
+          "type": "for_iterator",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
     "type": "for_clause_list",
     "named": true,
     "fields": {},
@@ -1161,6 +1184,10 @@
         "multiple": false,
         "required": true,
         "types": [
+          {
+            "type": "for_block_clause_list",
+            "named": true
+          },
           {
             "type": "for_clause_list",
             "named": true
@@ -3049,6 +3076,10 @@
   },
   {
     "type": "decides",
+    "named": false
+  },
+  {
+    "type": "do",
     "named": false
   },
   {
