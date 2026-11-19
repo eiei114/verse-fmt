@@ -105,6 +105,16 @@ fn ends_with_empty_case_arm(node: tree_sitter::Node<'_>) -> bool {
         .any(|child| !child.is_extra())
 }
 
+/// The option's value is its first named child that is not a comment, so a
+/// comment between `option` and `:` cannot hide the indented form.
+fn option_value_is_indented(option: tree_sitter::Node<'_>) -> bool {
+    let mut cursor = option.walk();
+    option
+        .named_children(&mut cursor)
+        .find(|child| !child.is_extra())
+        .is_some_and(|value| value.kind() == "indented_option_value")
+}
+
 fn ambiguous_expression_boundary(
     node: tree_sitter::Node<'_>,
     bytes: &[u8],
@@ -147,9 +157,7 @@ fn ambiguous_expression_boundary(
             .is_some_and(|clauses| clauses.kind() == "for_block_clause_list")
         && !(left.kind() == "option_expression"
             && (left.child_by_field_name("additional_value").is_some()
-                || left
-                    .named_child(0)
-                    .is_some_and(|value| value.kind() == "indented_option_value")))
+                || option_value_is_indented(left)))
     {
         return None;
     }
