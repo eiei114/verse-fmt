@@ -1193,6 +1193,48 @@ mod tests {
     }
 
     #[test]
+    fn braced_expression_list_belongs_to_its_declaration() {
+        let text = "F():void=\n    Store()\n    Values:={Read(),4}\n    Record:={Count:=2}\n    Use(Values,Record)\n";
+        let (_, _) = parsed(text);
+        let mut parser = Parser::new();
+        // SAFETY: same statically linked grammar as production.
+        parser
+            .set_language(&Language::new(unsafe {
+                LanguageFn::from_raw(tree_sitter_verse)
+            }))
+            .unwrap();
+        let tree = parser.parse(text, None).unwrap();
+        let root = tree.root_node();
+        let body = root
+            .named_child(0)
+            .unwrap()
+            .child_by_field_name("body")
+            .unwrap();
+        assert_eq!(body.named_child_count(), 4);
+        assert_eq!(body.named_child(0).unwrap().kind(), "call_expression");
+        let assigned = body
+            .named_child(1)
+            .unwrap()
+            .child_by_field_name("value")
+            .unwrap();
+        assert_eq!(assigned.kind(), "braced_expression_list");
+        assert_eq!(assigned.named_child_count(), 2);
+        let record = body
+            .named_child(2)
+            .unwrap()
+            .child_by_field_name("value")
+            .unwrap();
+        assert_eq!(record.kind(), "struct_literal");
+    }
+
+    #[test]
+    fn line_leading_braced_list_after_a_call_is_refused() {
+        let text = "F():void =\n    Store()\n    {Read(), 4}\n";
+        let source = Source::from_bytes(text.as_bytes()).unwrap();
+        assert!(Document::parse(&source).is_err());
+    }
+
+    #[test]
     fn for_filter_binding_owns_its_value_and_keeps_body_separate() {
         let text =
             "F():void =\n    for (I -> S : Ss, U := Us[I], U > 0):\n        G(S, U)\n    H()\n";

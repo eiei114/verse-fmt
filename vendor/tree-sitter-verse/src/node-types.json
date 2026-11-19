@@ -483,6 +483,21 @@
     }
   },
   {
+    "type": "braced_expression_list",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": true,
+      "types": [
+        {
+          "type": "_expression",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
     "type": "branch_expression",
     "named": true,
     "fields": {
@@ -2784,6 +2799,10 @@
         "types": [
           {
             "type": "_expression",
+            "named": true
+          },
+          {
+            "type": "braced_expression_list",
             "named": true
           },
           {

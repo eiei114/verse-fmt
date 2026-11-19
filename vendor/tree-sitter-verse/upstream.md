@@ -97,3 +97,8 @@ dedent, keeping the first following statement in its outer scope.
 
 A case arm may use an inline `set` assignment as its body. The assignment
 retains the same CST fields as a `set` inside an indented arm.
+
+A `:=` declaration can own a braced list of two or more comma-separated
+expressions. Initializer braces with `Name := Value` keep the existing
+struct-literal or construction nodes. A line-leading bare list following a
+call stays unsupported because of the possible attachment to that call.
