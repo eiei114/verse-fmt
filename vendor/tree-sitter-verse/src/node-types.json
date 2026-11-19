@@ -68,6 +68,10 @@
         "named": true
       },
       {
+        "type": "map_literal",
+        "named": true
+      },
+      {
         "type": "member_access",
         "named": true
       },
@@ -247,6 +251,10 @@
         },
         {
           "type": "named_argument",
+          "named": true
+        },
+        {
+          "type": "tuple_type",
           "named": true
         }
       ]
@@ -1117,6 +1125,10 @@
           "named": true
         },
         {
+          "type": "for_filter_binding",
+          "named": true
+        },
+        {
           "type": "for_iterator",
           "named": true
         }
@@ -1151,6 +1163,32 @@
         "types": [
           {
             "type": "for_clause_list",
+            "named": true
+          }
+        ]
+      }
+    }
+  },
+  {
+    "type": "for_filter_binding",
+    "named": true,
+    "fields": {
+      "name": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "identifier",
+            "named": true
+          }
+        ]
+      },
+      "value": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "_expression",
             "named": true
           }
         ]
@@ -1663,6 +1701,58 @@
           }
         ]
       }
+    }
+  },
+  {
+    "type": "map_entry",
+    "named": true,
+    "fields": {
+      "key": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "_expression",
+            "named": true
+          }
+        ]
+      },
+      "value": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "_expression",
+            "named": true
+          }
+        ]
+      }
+    }
+  },
+  {
+    "type": "map_literal",
+    "named": true,
+    "fields": {
+      "type": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "identifier",
+            "named": true
+          }
+        ]
+      }
+    },
+    "children": {
+      "multiple": true,
+      "required": true,
+      "types": [
+        {
+          "type": "map_entry",
+          "named": true
+        }
+      ]
     }
   },
   {
@@ -2505,6 +2595,16 @@
     "type": "type_definition",
     "named": true,
     "fields": {
+      "effect_specifiers": {
+        "multiple": false,
+        "required": false,
+        "types": [
+          {
+            "type": "specifier_list",
+            "named": true
+          }
+        ]
+      },
       "name": {
         "multiple": false,
         "required": true,

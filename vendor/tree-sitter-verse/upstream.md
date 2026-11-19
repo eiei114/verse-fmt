@@ -38,6 +38,34 @@ The pinned base parser is not a Verse compiler and its recovery behavior remains
 insufficient for formatting safety by itself; see `../../docs/parser-design.md`.
 
 P1 additionally accepts `identifier := range_expression` in for_iterator only.
-No scanner change or general header binding alternative accompanies this delta.
+The scanner is unchanged.
 ABI15 artifacts were regenerated with Tree-sitter CLI 0.25.10; hashes.json pins
 the changed grammar and generated outputs. See `../../docs/range-binding.md`.
+
+Call arguments admit a tuple type, including in a parametric archetype
+head such as `event(tuple(int, logic)){}`. The archetype keeps its existing
+call-shaped head and braced body.
+
+Parenthesized `for` headers accept a later comma-delimited filter binding.
+A direct range after `:=` retains its generator node. Filter bindings are
+visible after their initializer in the loop's scope.
+
+Declarations with `<constructor>` can use parameters, effects and a
+`:=` archetype body. Ordinary parameterized `:=` definitions retain their
+existing CST ownership.
+
+Indented `enum:` bodies use the same variant list as braced enums, with
+optional commas between variants and after the final variant.
+
+Function signatures allow whitespace between their closing parameter
+parenthesis and first effect specifier. Comparisons retain their operator
+nodes and the remaining specifier openers retain their immediate syntax.
+
+An indented archetype may omit all field initializers. Its scanner
+indent/dedent pair still encloses the archetype and keeps following statements
+at their original scope. The syntax adapter refuses a next-line brace
+that the parser attaches to an empty archetype as another construction.
+
+Nonempty map literals reuse the `map_literal` and `map_entry` rules
+from verse-lint's `94acbac`. An entry-less `map{}` retains its existing
+archetype node.
