@@ -147,7 +147,7 @@ module.exports = grammar({
       optional(field('name_specifiers', $.specifier_list)),
       ':',
       field('type', $._type),
-      optional(seq('=', field('value', $._expression))),
+      optional(seq(choice('=', ':='), field('value', $._expression))),
     ),
 
     // ─────────────────────────────────────────────
@@ -237,6 +237,7 @@ module.exports = grammar({
         $.enum_definition,
         $.interface_definition,
         $.module_definition,
+        $.braced_expression_list,
         $._expression,
       )),
     ),
@@ -801,6 +802,13 @@ module.exports = grammar({
       repeat($.field_initializer),
     ),
 
+    braced_expression_list: $ => seq(
+      '{',
+      $._expression,
+      repeat1(seq(',', $._expression)),
+      '}',
+    ),
+
     struct_literal: $ => seq(
       '{',
       $.field_initializer_list,
@@ -821,6 +829,8 @@ module.exports = grammar({
     _argument: $ => choice(
       $.named_argument,
       $.tuple_type,
+      $.array_type,
+      alias('logic', $.builtin_type),
       $._expression,
     ),
 
@@ -886,13 +896,15 @@ module.exports = grammar({
       '}',
     ),
 
-    // option{expr}
     option_expression: $ => seq(
       'option',
-      '{',
-      $._expression,
-      '}',
+      choice(
+        seq('{', $._expression, repeat(seq(',', field('additional_value', $._expression))), '}'),
+        $.indented_option_value,
+      ),
     ),
+
+    indented_option_value: $ => seq(':', $._indent, $._expression, $._dedent),
 
     // ─────────────────────────────────────────────
     // Control flow
@@ -917,7 +929,10 @@ module.exports = grammar({
           ')',
           field('consequence', $._control_block),
           repeat(seq('else', 'if', '(', field('condition', $.if_condition), ')', field('consequence', $._control_block))),
-          optional(seq('else', field('alternative', $._control_block))),
+          optional(seq('else', field('alternative', choice(
+            $._control_block,
+            alias($._indented_else_if_clause, $.else_if_clause),
+          )))),
         ),
         seq(
           '(',
@@ -927,16 +942,22 @@ module.exports = grammar({
           field('consequence', $._expression),
           optional(seq('else', field('alternative', $._expression))),
         ),
-        seq(
-          ':',
-          $._indent,
-          field('condition', $.if_block_condition),
-          $._dedent,
-          'then',
-          field('consequence', $._control_block),
-          optional(seq('else', field('alternative', $._control_block))),
-        ),
+        $._indented_if_body,
       ),
+    )),
+
+    else_if_clause: $ => $.if_expression,
+
+    _indented_else_if_clause: $ => prec.right(seq('if', $._indented_if_body)),
+
+    _indented_if_body: $ => prec.right(seq(
+      ':',
+      $._indent,
+      field('condition', $.if_block_condition),
+      $._dedent,
+      'then',
+      field('consequence', $._control_block),
+      optional(seq('else', field('alternative', choice($._control_block, $.else_if_clause)))),
     )),
 
     if_condition: $ => seq(
@@ -962,10 +983,32 @@ module.exports = grammar({
 
     for_expression: $ => seq(
       'for',
-      '(',
-      field('clauses', $.for_clause_list),
-      ')',
+      choice(
+        seq('(', field('clauses', $.for_clause_list), ')'),
+        seq(':', $._indent, field('clauses', $.for_block_clause_list), $._dedent, 'do'),
+      ),
       field('body', $._control_block),
+    ),
+
+    for_block_clause_list: $ => seq(
+      choice($.for_iterator, alias($._for_block_call_iterator, $.for_iterator)),
+      optional(','),
+      repeat(seq(choice($._for_clause, $.for_filter_binding, $.set_statement), optional(','))),
+    ),
+
+    // An adjacent opener belongs to the iterable's call. A newline never
+    // receives this preference, and the adapter still checks clause boundaries.
+    _for_block_call_iterator: $ => prec.dynamic(1, seq(
+      field('variable', $.identifier),
+      ':',
+      field('iterable', alias($._for_block_iterable_call, $.call_expression)),
+    )),
+
+    _for_block_iterable_call: $ => seq(
+      field('function', $.identifier),
+      token.immediate('('),
+      optional(field('arguments', $.argument_list)),
+      ')',
     ),
 
     for_clause_list: $ => seq(
@@ -1021,13 +1064,15 @@ module.exports = grammar({
       $._dedent,
     ),
 
-    // Arm body: inline expression, `{ ... }` block, or indented statements.
+    // An indented arm may be empty. The scanner emits its phantom block
+    // and any enclosing dedents before the next statement.
     case_arm: $ => seq(
       field('pattern', $._expression),
       '=>',
       field('body', choice(
         $.indented_block,
         $.brace_block,
+        $.set_statement,
         $._expression,
       )),
     ),

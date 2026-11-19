@@ -82,6 +82,95 @@ fn empty_archetype_brace_continuation(
         .then_some(source.body_start() + brace.start_byte())
 }
 
+const INDENTED_EXPRESSION_BOUNDARY_MESSAGE: &str =
+    "ambiguous clause boundary or line-leading postfix continuation";
+
+fn ends_with_empty_case_arm(node: tree_sitter::Node<'_>) -> bool {
+    if node.kind() != "case_expression" {
+        return false;
+    }
+    let mut cursor = node.walk();
+    let Some(body) = node
+        .named_children(&mut cursor)
+        .filter(|child| child.kind() == "case_arm")
+        .last()
+        .and_then(|arm| arm.child_by_field_name("body"))
+        .filter(|body| body.kind() == "indented_block")
+    else {
+        return false;
+    };
+    let mut cursor = body.walk();
+    !body
+        .named_children(&mut cursor)
+        .any(|child| !child.is_extra())
+}
+
+/// The option's value is its first named child that is not a comment, so a
+/// comment between `option` and `:` cannot hide the indented form.
+fn option_value_is_indented(option: tree_sitter::Node<'_>) -> bool {
+    let mut cursor = option.walk();
+    option
+        .named_children(&mut cursor)
+        .find(|child| !child.is_extra())
+        .is_some_and(|value| value.kind() == "indented_option_value")
+}
+
+fn ambiguous_expression_boundary(
+    node: tree_sitter::Node<'_>,
+    bytes: &[u8],
+    in_checked_block: bool,
+) -> Option<usize> {
+    if node.kind() == "for_block_clause_list" {
+        let mut cursor = node.walk();
+        let mut previous = None::<tree_sitter::Node<'_>>;
+        for child in node.children(&mut cursor).filter(|child| !child.is_extra()) {
+            if child.kind() == "," {
+                previous = None;
+            } else {
+                if let Some(left) = previous {
+                    let left_text = bytes[left.byte_range()].trim_ascii_end();
+                    let end = left.start_byte() + left_text.len();
+                    if !bytes[end..child.start_byte()].contains(&b'\n') {
+                        return Some(child.start_byte());
+                    }
+                }
+                previous = Some(child);
+            }
+        }
+        return None;
+    }
+    // The pinned grammar can attach the start of the next clause to a
+    // previous expression as a postfix. Check the operator's own source span
+    // so parentheses inside an explicitly delimited argument stay supported.
+    let (field, opener) = match node.kind() {
+        "call_expression" => ("function", "("),
+        "failable_call_expression" => ("function", "["),
+        "index_expression" => ("object", "["),
+        "object_construction" | "map_literal" => ("type", "{"),
+        _ => return None,
+    };
+    let left = node.child_by_field_name(field)?;
+    if !in_checked_block
+        && !ends_with_empty_case_arm(left)
+        && !left
+            .child_by_field_name("clauses")
+            .is_some_and(|clauses| clauses.kind() == "for_block_clause_list")
+        && !(left.kind() == "option_expression"
+            && (left.child_by_field_name("additional_value").is_some()
+                || option_value_is_indented(left)))
+    {
+        return None;
+    }
+    let mut cursor = node.walk();
+    let next = node
+        .children(&mut cursor)
+        .find(|child| child.kind() == opener)?;
+    let end = left.start_byte() + bytes[left.byte_range()].trim_ascii_end().len();
+    bytes[end..next.start_byte()]
+        .contains(&b'\n')
+        .then_some(next.start_byte())
+}
+
 impl Document {
     /// Parse without collecting a trace; the crate's own tests use this, the
     /// binary always needs the trace that `--explain` prints.
@@ -191,6 +280,7 @@ impl Document {
             .collect();
         let mut cursor = tree.walk();
         let mut depth = 0;
+        let mut continuation_guard_depth = None;
         loop {
             let node = cursor.node();
             if node.kind() == "block_comment" {
@@ -224,6 +314,23 @@ impl Document {
                         "binary `+`/`-` operator starts a new line; a leading unary operand is ambiguous with a continued expression in the pinned grammar",
                     ));
                 }
+            }
+            if continuation_guard_depth.is_none()
+                && (matches!(
+                    node.kind(),
+                    "for_block_clause_list" | "indented_option_value"
+                ) || node.child_by_field_name("additional_value").is_some())
+            {
+                continuation_guard_depth = Some(depth);
+            }
+            if guard.is_none()
+                && let Some(offset) =
+                    ambiguous_expression_boundary(node, bytes, continuation_guard_depth.is_some())
+            {
+                guard = Some(Failure::guarded(
+                    source.body_start() + offset,
+                    INDENTED_EXPRESSION_BOUNDARY_MESSAGE,
+                ));
             }
             if guard.is_none()
                 && let Some(start) = empty_archetype_brace_continuation(node, source)
@@ -313,6 +420,9 @@ impl Document {
             loop {
                 if fingerprint {
                     shape.push((cursor.node().kind_id(), false));
+                }
+                if continuation_guard_depth == Some(depth) {
+                    continuation_guard_depth = None;
                 }
                 if cursor.goto_next_sibling() {
                     break;
@@ -758,6 +868,447 @@ mod tests {
         assert_eq!(arguments.named_child_count(), 1);
         assert_eq!(arguments.named_child(0).unwrap().kind(), "tuple_type");
         assert_eq!(class.named_child(1).unwrap().kind(), "field_declaration");
+    }
+
+    #[test]
+    fn indented_for_retains_clauses_body_and_sibling() {
+        let text = "F():void=\n    for:\n        Key -> Item : Items\n        Choice := Pick[Key]\n        Choice > 0\n    do:\n        Use(Item, Choice)\n    Done()\n";
+        let (_, _) = parsed(text);
+        let mut parser = Parser::new();
+        // SAFETY: same statically linked grammar as production.
+        parser
+            .set_language(&Language::new(unsafe {
+                LanguageFn::from_raw(tree_sitter_verse)
+            }))
+            .unwrap();
+        let tree = parser.parse(text, None).unwrap();
+        let root = tree.root_node();
+        let body = root
+            .named_child(0)
+            .unwrap()
+            .child_by_field_name("body")
+            .unwrap();
+        assert_eq!(body.named_child_count(), 2);
+        let expression = body.named_child(0).unwrap();
+        assert_eq!(expression.kind(), "for_expression");
+        let clauses = expression.child_by_field_name("clauses").unwrap();
+        assert_eq!(clauses.kind(), "for_block_clause_list");
+        let mut cursor = clauses.walk();
+        assert_eq!(
+            clauses
+                .named_children(&mut cursor)
+                .map(|child| child.kind())
+                .collect::<Vec<_>>(),
+            ["for_iterator", "for_filter_binding", "binary_expression"]
+        );
+        assert_eq!(
+            expression.child_by_field_name("body").unwrap().kind(),
+            "colon_block"
+        );
+        assert_eq!(body.named_child(1).unwrap().kind(), "call_expression");
+    }
+
+    #[test]
+    fn indented_for_refuses_ambiguous_clause_boundaries() {
+        for joined in ["(0)", "[0]", "{Value := 0}"] {
+            let text = format!(
+                "F():void =\n    for:\n        Item : Items\n        {joined}\n    do:\n        Use(Item)\n"
+            );
+            let source = Source::from_bytes(text.as_bytes()).unwrap();
+            let error = Document::parse(&source).unwrap_err();
+            assert!(
+                error.message.contains(INDENTED_EXPRESSION_BOUNDARY_MESSAGE),
+                "{joined}: {error:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn indented_for_result_refuses_next_line_index() {
+        let text = "F():void =\n    Selection := for:\n        Item : Items\n    do:\n        Item\n    [0]\n";
+        let source = Source::from_bytes(text.as_bytes()).unwrap();
+        let error = Document::parse(&source).unwrap_err();
+        assert!(
+            error.message.contains(INDENTED_EXPRESSION_BOUNDARY_MESSAGE),
+            "{error:?}"
+        );
+    }
+
+    #[test]
+    fn mutable_fields_accept_both_initializer_spellings() {
+        let text = "Parcel := module{\nCrate := class:\n  @editable\n  var Slots:[]int:=array{}\n  var Count:int=0\n}\n";
+        let (_, _) = parsed(text);
+        let mut parser = Parser::new();
+        // SAFETY: same statically linked grammar as production.
+        parser
+            .set_language(&Language::new(unsafe {
+                LanguageFn::from_raw(tree_sitter_verse)
+            }))
+            .unwrap();
+        let tree = parser.parse(text, None).unwrap();
+        let root = tree.root_node();
+        let definition = root
+            .named_child(0)
+            .unwrap()
+            .child_by_field_name("value")
+            .unwrap();
+        assert_eq!(definition.kind(), "module_definition");
+        let class = definition
+            .named_child(0)
+            .unwrap()
+            .child_by_field_name("value")
+            .unwrap();
+        assert_eq!(class.kind(), "class_definition");
+        for (index, value) in [(1, "array_literal"), (2, "integer_literal")] {
+            let variable = class.named_child(index).unwrap();
+            assert_eq!(variable.kind(), "var_declaration");
+            assert_eq!(variable.child_by_field_name("value").unwrap().kind(), value);
+        }
+    }
+
+    #[test]
+    fn option_values_own_their_expressions_and_leave_following_calls_separate() {
+        let text = "F():void=\n  First := option{1,2}\n  Second := option:\n    Pick[]\n  Use(First,Second)\n";
+        let (_, _) = parsed(text);
+        let mut parser = Parser::new();
+        // SAFETY: same statically linked grammar as production.
+        parser
+            .set_language(&Language::new(unsafe {
+                LanguageFn::from_raw(tree_sitter_verse)
+            }))
+            .unwrap();
+        let tree = parser.parse(text, None).unwrap();
+        let root = tree.root_node();
+        let body = root
+            .named_child(0)
+            .unwrap()
+            .child_by_field_name("body")
+            .unwrap();
+        assert_eq!(body.named_child_count(), 3);
+        let braced = body
+            .named_child(0)
+            .unwrap()
+            .child_by_field_name("value")
+            .unwrap();
+        assert_eq!(braced.kind(), "option_expression");
+        assert_eq!(braced.named_child_count(), 2);
+        assert_eq!(
+            braced
+                .child_by_field_name("additional_value")
+                .unwrap()
+                .kind(),
+            "integer_literal"
+        );
+        let indented = body
+            .named_child(1)
+            .unwrap()
+            .child_by_field_name("value")
+            .unwrap();
+        assert_eq!(indented.kind(), "option_expression");
+        let value = indented.named_child(0).unwrap();
+        assert_eq!(value.kind(), "indented_option_value");
+        assert_eq!(
+            value.named_child(0).unwrap().kind(),
+            "failable_call_expression"
+        );
+        assert_eq!(body.named_child(2).unwrap().kind(), "call_expression");
+    }
+
+    #[test]
+    fn indented_option_refuses_a_line_leading_index() {
+        let text = "F():void =\n    Value := option:\n        Pick[]\n    [0]\n";
+        let source = Source::from_bytes(text.as_bytes()).unwrap();
+        let error = Document::parse(&source).unwrap_err();
+        assert!(
+            error.message.contains(INDENTED_EXPRESSION_BOUNDARY_MESSAGE),
+            "{error:?}"
+        );
+    }
+
+    #[test]
+    fn type_arguments_keep_the_archetype_and_logic_literal_distinct() {
+        let text = "Parcel := module{\nCrate := class:\n    Ready:event(logic)=event(logic){}\n    Collected:event([]int)=event([]int){}\n    F():void =\n        Use(logic{true})\n}\n";
+        let (_, _) = parsed(text);
+        let mut parser = Parser::new();
+        // SAFETY: same statically linked grammar as production.
+        parser
+            .set_language(&Language::new(unsafe {
+                LanguageFn::from_raw(tree_sitter_verse)
+            }))
+            .unwrap();
+        let tree = parser.parse(text, None).unwrap();
+        let root = tree.root_node();
+        let module = root
+            .named_child(0)
+            .unwrap()
+            .child_by_field_name("value")
+            .unwrap();
+        let class = module
+            .named_child(0)
+            .unwrap()
+            .child_by_field_name("value")
+            .unwrap();
+        for (index, expected) in [(0, "builtin_type"), (1, "array_type")] {
+            let initializer = class
+                .named_child(index)
+                .unwrap()
+                .child_by_field_name("default")
+                .unwrap();
+            assert_eq!(initializer.kind(), "object_construction");
+            let head = initializer.child_by_field_name("type").unwrap();
+            assert_eq!(head.kind(), "call_expression");
+            let arguments = head.child_by_field_name("arguments").unwrap();
+            assert_eq!(arguments.named_child(0).unwrap().kind(), expected);
+        }
+        let body = class
+            .named_child(2)
+            .unwrap()
+            .child_by_field_name("body")
+            .unwrap();
+        let call = body.named_child(0).unwrap();
+        let arguments = call.child_by_field_name("arguments").unwrap();
+        assert_eq!(arguments.named_child(0).unwrap().kind(), "logic_literal");
+    }
+
+    #[test]
+    fn mixed_else_if_chains_preserve_alternative_and_sibling_ownership() {
+        let text = "F():void=\n  if:\n    Ready?\n  then:\n    Start()\n  else if (Delay > 0):\n    Retry()\n  else if:\n    Expired?\n  then:\n    Stop()\n  else:\n    Wait()\n  Done()\n";
+        let (_, _) = parsed(text);
+        let mut parser = Parser::new();
+        // SAFETY: same statically linked grammar as production.
+        parser
+            .set_language(&Language::new(unsafe {
+                LanguageFn::from_raw(tree_sitter_verse)
+            }))
+            .unwrap();
+        let tree = parser.parse(text, None).unwrap();
+        let root = tree.root_node();
+        let body = root
+            .named_child(0)
+            .unwrap()
+            .child_by_field_name("body")
+            .unwrap();
+        assert_eq!(body.named_child_count(), 2);
+        let condition = body.named_child(0).unwrap();
+        assert_eq!(condition.kind(), "if_expression");
+        let alternative = condition.child_by_field_name("alternative").unwrap();
+        assert_eq!(alternative.kind(), "else_if_clause");
+        let middle = alternative.named_child(0).unwrap();
+        assert_eq!(
+            middle.child_by_field_name("condition").unwrap().kind(),
+            "if_condition"
+        );
+        let final_branch = middle.child_by_field_name("alternative").unwrap();
+        assert_eq!(final_branch.kind(), "else_if_clause");
+        assert_eq!(
+            final_branch
+                .child_by_field_name("condition")
+                .unwrap()
+                .kind(),
+            "if_block_condition"
+        );
+        assert_eq!(
+            final_branch
+                .child_by_field_name("alternative")
+                .unwrap()
+                .kind(),
+            "colon_block"
+        );
+        assert_eq!(body.named_child(1).unwrap().kind(), "call_expression");
+    }
+
+    #[test]
+    fn an_empty_case_arm_refuses_a_next_line_index_or_brace() {
+        for tail in ["[0]", "{Value := 1}"] {
+            let text = format!(
+                "F():void =\n    case(Mode):\n        0 => Use()\n        _ =>\n    {tail}\n"
+            );
+            let source = Source::from_bytes(text.as_bytes()).unwrap();
+            let error = Document::parse(&source).unwrap_err();
+            assert!(
+                error.message.contains(INDENTED_EXPRESSION_BOUNDARY_MESSAGE),
+                "{tail}: {error:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn empty_case_arm_closes_before_an_outer_sibling() {
+        let text = "Parcel := module{\nCrate := class:\n    Start():void =\n        case(Mode):\n            0 => Use()\n            _ =>\n\n    Stop():void =\n        Finish()\n}\n";
+        let (_, _) = parsed(text);
+        let mut parser = Parser::new();
+        // SAFETY: same statically linked grammar as production.
+        parser
+            .set_language(&Language::new(unsafe {
+                LanguageFn::from_raw(tree_sitter_verse)
+            }))
+            .unwrap();
+        let tree = parser.parse(text, None).unwrap();
+        let root = tree.root_node();
+        let module = root
+            .named_child(0)
+            .unwrap()
+            .child_by_field_name("value")
+            .unwrap();
+        let class = module
+            .named_child(0)
+            .unwrap()
+            .child_by_field_name("value")
+            .unwrap();
+        assert_eq!(class.named_child_count(), 2);
+        let body = class
+            .named_child(0)
+            .unwrap()
+            .child_by_field_name("body")
+            .unwrap();
+        let case = body.named_child(0).unwrap();
+        assert_eq!(case.kind(), "case_expression");
+        let arm = case.named_child(2).unwrap();
+        let empty = arm.child_by_field_name("body").unwrap();
+        assert_eq!(empty.kind(), "indented_block");
+        assert_eq!(empty.named_child_count(), 0);
+        let next = class.named_child(1).unwrap();
+        assert_eq!(next.kind(), "function_definition");
+    }
+
+    #[test]
+    fn case_inline_set_owns_its_assignment() {
+        let text = "F():void=\n    var Count:int = 0\n    case(Count):\n        0 => set Count = 1\n        _ => {}\n";
+        let (_, _) = parsed(text);
+        let mut parser = Parser::new();
+        // SAFETY: same statically linked grammar as production.
+        parser
+            .set_language(&Language::new(unsafe {
+                LanguageFn::from_raw(tree_sitter_verse)
+            }))
+            .unwrap();
+        let tree = parser.parse(text, None).unwrap();
+        let root = tree.root_node();
+        let block = root
+            .named_child(0)
+            .unwrap()
+            .child_by_field_name("body")
+            .unwrap();
+        let case = block.named_child(1).unwrap();
+        assert_eq!(case.kind(), "case_expression");
+        let arm = case.named_child(1).unwrap();
+        assert_eq!(arm.kind(), "case_arm");
+        assert_eq!(
+            arm.child_by_field_name("body").unwrap().kind(),
+            "set_statement"
+        );
+        assert_eq!(case.named_child(2).unwrap().kind(), "case_arm");
+    }
+
+    #[test]
+    fn braced_expression_list_belongs_to_its_declaration() {
+        let text = "F():void=\n    Store()\n    Values:={Read(),4}\n    Record:={Count:=2}\n    Use(Values,Record)\n";
+        let (_, _) = parsed(text);
+        let mut parser = Parser::new();
+        // SAFETY: same statically linked grammar as production.
+        parser
+            .set_language(&Language::new(unsafe {
+                LanguageFn::from_raw(tree_sitter_verse)
+            }))
+            .unwrap();
+        let tree = parser.parse(text, None).unwrap();
+        let root = tree.root_node();
+        let body = root
+            .named_child(0)
+            .unwrap()
+            .child_by_field_name("body")
+            .unwrap();
+        assert_eq!(body.named_child_count(), 4);
+        assert_eq!(body.named_child(0).unwrap().kind(), "call_expression");
+        let assigned = body
+            .named_child(1)
+            .unwrap()
+            .child_by_field_name("value")
+            .unwrap();
+        assert_eq!(assigned.kind(), "braced_expression_list");
+        assert_eq!(assigned.named_child_count(), 2);
+        let record = body
+            .named_child(2)
+            .unwrap()
+            .child_by_field_name("value")
+            .unwrap();
+        assert_eq!(record.kind(), "struct_literal");
+    }
+
+    #[test]
+    fn line_leading_braced_list_after_a_call_is_refused() {
+        let text = "F():void =\n    Store()\n    {Read(), 4}\n";
+        let source = Source::from_bytes(text.as_bytes()).unwrap();
+        assert!(Document::parse(&source).is_err());
+    }
+
+    #[test]
+    fn indented_for_keeps_indexed_set_in_its_header() {
+        let text = "F():void=\n    for:\n        Item : Items\n        not Seen[Item]\n        set Marks[Item] += array{Item}\n    do:\n        Use(Item)\n";
+        let (_, _) = parsed(text);
+        let mut parser = Parser::new();
+        // SAFETY: same statically linked grammar as production.
+        parser
+            .set_language(&Language::new(unsafe {
+                LanguageFn::from_raw(tree_sitter_verse)
+            }))
+            .unwrap();
+        let tree = parser.parse(text, None).unwrap();
+        let root = tree.root_node();
+        let body = root
+            .named_child(0)
+            .unwrap()
+            .child_by_field_name("body")
+            .unwrap();
+        let loop_node = body.named_child(0).unwrap();
+        let clauses = loop_node.child_by_field_name("clauses").unwrap();
+        assert_eq!(clauses.named_child_count(), 3);
+        let assignment = clauses.named_child(2).unwrap();
+        assert_eq!(assignment.kind(), "set_statement");
+        assert_eq!(
+            assignment.child_by_field_name("operator").unwrap().kind(),
+            "+="
+        );
+        assert_eq!(
+            loop_node.child_by_field_name("body").unwrap().kind(),
+            "colon_block"
+        );
+    }
+
+    #[test]
+    fn an_adjacent_call_stays_inside_the_first_indented_iterator() {
+        let text = "F():void=\n    for:\n        Item : Fetch(Values)\n        not Seen[Item]\n        set Marks[Item] += array{Item}\n    do:\n        Use(Item)\n";
+        let (_, _) = parsed(text);
+        let mut parser = Parser::new();
+        // SAFETY: same statically linked grammar as production.
+        parser
+            .set_language(&Language::new(unsafe {
+                LanguageFn::from_raw(tree_sitter_verse)
+            }))
+            .unwrap();
+        let tree = parser.parse(text, None).unwrap();
+        let root = tree.root_node();
+        let body = root
+            .named_child(0)
+            .unwrap()
+            .child_by_field_name("body")
+            .unwrap();
+        let expression = body.named_child(0).unwrap();
+        let clauses = expression.child_by_field_name("clauses").unwrap();
+        assert_eq!(clauses.named_child_count(), 3);
+        let iterator = clauses.named_child(0).unwrap();
+        assert_eq!(iterator.kind(), "for_iterator");
+        let iterable = iterator.child_by_field_name("iterable").unwrap();
+        assert_eq!(iterable.kind(), "call_expression");
+        assert_eq!(
+            iterable
+                .child_by_field_name("function")
+                .unwrap()
+                .utf8_text(text.as_bytes())
+                .unwrap(),
+            "Fetch"
+        );
+        assert_eq!(clauses.named_child(1).unwrap().kind(), "unary_expression");
     }
 
     #[test]

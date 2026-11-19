@@ -69,3 +69,43 @@ that the parser attaches to an empty archetype as another construction.
 Nonempty map literals reuse the `map_literal` and `map_entry` rules
 from verse-lint's `94acbac`. An entry-less `map{}` retains its existing
 archetype node.
+
+Indented `for: … do:` headers begin with an iterator. Later clauses reuse the
+parenthesized iterator and filter-binding nodes. A guard rejects same-line
+clauses without a comma and line-leading postfix openers that would otherwise
+be absorbed by the preceding expression. The same check covers a postfix on\na new line after the loop result. Loop bindings stay in the loop scope.
+
+A typed `var` declaration accepts `=` or `:=` before its initializer.
+Both spellings keep the same mutable binding, type and initializer fields.
+
+An `option` expression supports comma-separated values in braces and one
+expression in an indented body. The guard refuses a line-leading postfix
+that would attach to a previous expression across these newly accepted boundaries.
+
+Call arguments admit unambiguous array types (`[]T`) and the bare `logic`
+type keyword. `logic{...}` still parses as a logic expression, and the
+archetype keeps its call-shaped head and braced body.
+
+An indented `if: … then:` and parenthesized `if (...):` can share an
+`else if` chain. Mixed alternatives preserve the condition/body ownership
+and the following sibling. The linter marks mixed-clause semantic coverage
+incomplete.
+
+An empty indented block can end at the same newline as its enclosing blocks.
+The scanner queues the enclosing dedents along with the phantom block's
+dedent, keeping the first following statement in its outer scope.
+
+A case arm may use an inline `set` assignment as its body. The assignment
+retains the same CST fields as a `set` inside an indented arm.
+
+A `:=` declaration can own a braced list of two or more comma-separated
+expressions. Initializer braces with `Name := Value` keep the existing
+struct-literal or construction nodes. A line-leading bare list following a
+call stays unsupported because of the possible attachment to that call.
+
+An indented `for` header can contain a `set` clause after its iterator.
+The header retains the assignment and its operator.
+
+When an indented for header starts with `Item : Read(Values)`, the adjacent
+opener keeps the call inside the first iterator. The clause boundary guard
+continues to reject a postfix attached across a newline.
