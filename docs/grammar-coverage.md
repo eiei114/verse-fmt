@@ -47,6 +47,7 @@ The tool is an unreleased alpha and never replaces the UEFN compiler.
 | Array and `logic` type arguments in archetype heads | Locally supported | `archetype-array-and-logic-arguments` corpus case and CST tests |
 | Mixed parenthesized and indented `else if` clauses | Locally supported | `mixed-else-if-chain` corpus case and CST tests |
 | Empty indented case arm before an outer sibling | Locally supported; enclosing dedents are retained | `empty-case-arm-before-dedent` corpus case and CST tests |
+| Shallower final empty `_ =>` in a case | Locally supported when the line still belongs to the case and the following content exits it. Aligned to sibling arms where normalizing block indentation. | Golden, refusal and CST ownership tests |
 | Inline `set` after a case arrow | Locally supported; the assignment belongs to its arm | `case-inline-set` corpus case and CST tests |
 | Braced expression list in a `:=` declaration | Locally supported with two or more comma-delimited expressions | `braced-expression-list` corpus case and CST tests |
 | Indexed `set` in an indented `for` header | Locally supported | `for-header-set-clause` corpus case and CST tests |

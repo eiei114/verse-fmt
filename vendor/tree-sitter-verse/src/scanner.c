@@ -9,7 +9,8 @@
 typedef enum {
   INDENT,        // 0
   DEDENT,        // 1
-  BLOCK_COMMENT, // 2
+  CASE_INDENT,   // 2
+  BLOCK_COMMENT, // 3
 } TokenType;
 
 /* ─────────────────────────────────────────────────────────────────
@@ -18,6 +19,9 @@ typedef enum {
 /* The serialized state is one byte plus two uint32_t fields and the stack.
  * Keep the worst-case output below Tree-sitter's 1024-byte buffer. */
 #define MAX_INDENT ((TREE_SITTER_SERIALIZATION_BUFFER_SIZE - 1 - 2 * sizeof(uint32_t)) / sizeof(uint32_t))
+
+/* The high bit tags the frame opened by a case header. */
+#define CASE_FRAME (UINT32_C(1) << 31)
 
 typedef struct {
   uint32_t indent_stack[MAX_INDENT];
@@ -38,8 +42,12 @@ typedef struct {
  * Helpers
  * ───────────────────────────────────────────────────────────────── */
 
+static inline uint32_t indent_column(uint32_t frame) {
+  return frame & ~CASE_FRAME;
+}
+
 static inline uint32_t current_indent(const Scanner *s) {
-  return s->stack_size > 0 ? s->indent_stack[s->stack_size - 1] : 0;
+  return s->stack_size > 0 ? indent_column(s->indent_stack[s->stack_size - 1]) : 0;
 }
 
 /* Advance past one character (consuming it). */
@@ -101,11 +109,11 @@ static bool scan_block_comment(TSLexer *lexer) {
  *             returned content line (or 0 at EOF).
  *             Returns UINT32_MAX on EOF.
  * ───────────────────────────────────────────────────────────────── */
-static uint32_t find_next_content_col(TSLexer *lexer) {
+static uint32_t find_next_content_col(TSLexer *lexer, void (*step)(TSLexer *)) {
   while (true) {
     /* ── Skip leading newlines ──────────────────────────────────── */
     while (lexer->lookahead == '\n' || lexer->lookahead == '\r')
-      skip(lexer);
+      step(lexer);
     if (lexer->lookahead == 0) return UINT32_MAX;
 
     /* ── Count column of this line ──────────────────────────────── */
@@ -113,7 +121,7 @@ static uint32_t find_next_content_col(TSLexer *lexer) {
     while (lexer->lookahead == ' ' || lexer->lookahead == '\t') {
       if (lexer->lookahead == '\t') col = (col + 8) & ~7u;
       else col++;
-      skip(lexer);
+      step(lexer);
     }
 
     /* ── Blank line ─────────────────────────────────────────────── */
@@ -124,6 +132,40 @@ static uint32_t find_next_content_col(TSLexer *lexer) {
     /* ── Any content (including `#` comments and `<#>`) ───────── */
     return col;
   }
+}
+
+/* Look past a plain, empty wildcard without consuming it as part of a
+ * dedent. The next content line must leave the case; comments at this
+ * boundary are left to the ordinary scanner. */
+static bool ends_case(TSLexer *lexer, uint32_t outer_column) {
+  lexer->mark_end(lexer);
+  advance(lexer); /* '_' */
+  while (lexer->lookahead == ' ') advance(lexer);
+  if (lexer->lookahead != '=') return false;
+  advance(lexer);
+  if (lexer->lookahead != '>') return false;
+  advance(lexer);
+  while (lexer->lookahead == ' ' || lexer->lookahead == '\t') advance(lexer);
+  if (lexer->lookahead == 0) return true;
+  if (lexer->lookahead != '\n' && lexer->lookahead != '\r') return false;
+  uint32_t next = find_next_content_col(lexer, advance);
+  return next == UINT32_MAX ||
+         (next <= outer_column && lexer->lookahead != '#' && lexer->lookahead != '<');
+}
+
+static uint32_t dedents_to(const Scanner *s, TSLexer *lexer, uint32_t col) {
+  for (uint32_t i = s->stack_size; i > 1; i--) {
+    uint32_t frame = s->indent_stack[i - 1];
+    if (col >= indent_column(frame)) return s->stack_size - i;
+    uint32_t outer_column = indent_column(s->indent_stack[i - 2]);
+    if ((frame & CASE_FRAME) && col > outer_column &&
+        lexer->lookahead == '_' && col == lexer->get_column(lexer)) {
+      /* Only this case can contain the shallower line. If the lookahead
+       * fails, close this frame too and leave its parent open. */
+      return s->stack_size - i + (ends_case(lexer, outer_column) ? 0 : 1);
+    }
+  }
+  return s->stack_size - 1;
 }
 
 /* ─────────────────────────────────────────────────────────────────
@@ -197,16 +239,20 @@ static bool scan(Scanner *s, TSLexer *lexer, const bool *valid_symbols) {
      Therefore, bracket_depth tracking is unnecessary in this
      approach — we just rely on the grammar constraints. */
 
+  bool case_indent = valid_symbols[CASE_INDENT] && !valid_symbols[INDENT];
+  bool can_indent = valid_symbols[INDENT] || case_indent;
+  TokenType indent_token = case_indent ? CASE_INDENT : INDENT;
+
   /* ── EOF: emit phantom INDENT (for empty bodies) or DEDENT ──── */
   if (lexer->lookahead == 0) {
-    if (valid_symbols[INDENT] && !valid_symbols[DEDENT]) {
+    if (can_indent && !valid_symbols[DEDENT]) {
       /* Empty body at end-of-file: `foo := interface:` with nothing after.
          Push a phantom indent level so the following DEDENT call can close it. */
       uint32_t prev = current_indent(s);
       if (s->stack_size < MAX_INDENT) {
         s->indent_stack[s->stack_size++] = prev + 1;
       }
-      lexer->result_symbol = INDENT;
+      lexer->result_symbol = indent_token;
       return true;
     }
     if (valid_symbols[DEDENT] && s->stack_size > 1) {
@@ -225,7 +271,7 @@ static bool scan(Scanner *s, TSLexer *lexer, const bool *valid_symbols) {
     return false;
   }
 
-  if (!valid_symbols[INDENT] && !valid_symbols[DEDENT]) {
+  if (!can_indent && !valid_symbols[DEDENT]) {
     return false;
   }
 
@@ -234,10 +280,8 @@ static bool scan(Scanner *s, TSLexer *lexer, const bool *valid_symbols) {
     skip(lexer);
   }
 
-  /* Find the column of the next non-blank, non-comment content line.
-     find_next_content_col() also skips <#> hash_gt_comments and their
-     indented continuation lines. */
-  uint32_t col = find_next_content_col(lexer);
+  /* Find the column of the next non-blank line. */
+  uint32_t col = find_next_content_col(lexer, skip);
 
   /* ── EOF reached after consuming newlines/blanks/comments ─────── */
   if (col == UINT32_MAX || lexer->lookahead == 0) {
@@ -245,11 +289,11 @@ static bool scan(Scanner *s, TSLexer *lexer, const bool *valid_symbols) {
     /* Prefer closing open bodies at EOF over opening new phantom bodies.
        Only emit phantom INDENT if DEDENT is not also valid (i.e., we're
        strictly waiting for an INDENT to start an empty body). */
-    if (valid_symbols[INDENT] && !valid_symbols[DEDENT]) {
+    if (can_indent && !valid_symbols[DEDENT]) {
       if (s->stack_size < MAX_INDENT) {
         s->indent_stack[s->stack_size++] = prev + 1;
       }
-      lexer->result_symbol = INDENT;
+      lexer->result_symbol = indent_token;
       return true;
     }
     if (valid_symbols[DEDENT] && s->stack_size > 1) {
@@ -262,7 +306,7 @@ static bool scan(Scanner *s, TSLexer *lexer, const bool *valid_symbols) {
 
   uint32_t prev = current_indent(s);
 
-  if (col > prev && valid_symbols[INDENT]) {
+  if (col > prev && can_indent) {
     /* col > stack-top.  But is it a genuine child, or a sibling that
        only appears deeper because the indent-stack was popped past the
        opener's column?
@@ -284,14 +328,16 @@ static bool scan(Scanner *s, TSLexer *lexer, const bool *valid_symbols) {
         s->indent_stack[s->stack_size++] = prev + 1;
       }
       s->pending_dedents = 1;
-      lexer->result_symbol = INDENT;
+      lexer->result_symbol = indent_token;
       return true;
     }
     /* Genuine increase in indentation. */
     if (s->stack_size < MAX_INDENT) {
-      s->indent_stack[s->stack_size++] = col;
+      bool plain_case = case_indent && col == lexer->get_column(lexer) &&
+                        lexer->lookahead != '#' && lexer->lookahead != '<';
+      s->indent_stack[s->stack_size++] = col | (plain_case ? CASE_FRAME : 0);
     }
-    lexer->result_symbol = INDENT;
+    lexer->result_symbol = indent_token;
     return true;
   }
 
@@ -306,21 +352,16 @@ static bool scan(Scanner *s, TSLexer *lexer, const bool *valid_symbols) {
      position (still pointing at the sibling's first character, not a newline).
      Without pending_dedents, the `lookahead != '\n'` guard would return false
      and DEDENT would never fire, causing infinite nesting. */
-  if (col <= prev && valid_symbols[INDENT]) {
-    uint32_t outer_size = s->stack_size;
+  if (col <= prev && can_indent) {
+    uint32_t outer_dedents = dedents_to(s, lexer, col);
     if (s->stack_size < MAX_INDENT) {
       s->indent_stack[s->stack_size++] = prev + 1;
     }
-    s->pending_dedents = 1;
     /* The newline has already been consumed. Queue the caller's dedents
        too, before the scanner reaches the next statement at column col. */
-    if (col < prev) {
-      s->last_stmt_col = col;
-      for (uint32_t i = outer_size; i > 0 && s->indent_stack[i - 1] > col; i--) {
-        s->pending_dedents++;
-      }
-    }
-    lexer->result_symbol = INDENT;
+    s->pending_dedents = 1 + outer_dedents;
+    if (col < prev) s->last_stmt_col = col;
+    lexer->result_symbol = indent_token;
     return true;
   }
 
@@ -328,18 +369,10 @@ static bool scan(Scanner *s, TSLexer *lexer, const bool *valid_symbols) {
     /* Decrease in indentation: may need multiple DEDENTs.
        Record where we landed so future phantom-INDENT detection works. */
     s->last_stmt_col = col;
-    uint32_t dedents = 0;
-    while (s->stack_size > 0 && s->indent_stack[s->stack_size - 1] > col) {
-      s->stack_size--;
-      dedents++;
-    }
+    uint32_t dedents = dedents_to(s, lexer, col);
     if (dedents > 0 && valid_symbols[DEDENT]) {
-      /* Emit first DEDENT now; stash remaining. */
       s->pending_dedents = dedents - 1;
-      /* stack_size already decremented above for all levels;
-         restore and let pending_dedents decrement one by one. */
-      s->stack_size += dedents; /* undo: will be re-decremented */
-      s->stack_size--;          /* first DEDENT */
+      s->stack_size--;
       lexer->result_symbol = DEDENT;
       return true;
     }
