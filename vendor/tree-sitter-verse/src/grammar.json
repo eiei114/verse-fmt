@@ -3822,6 +3822,19 @@
         },
         {
           "type": "SYMBOL",
+          "name": "array_type"
+        },
+        {
+          "type": "ALIAS",
+          "content": {
+            "type": "STRING",
+            "value": "logic"
+          },
+          "named": true,
+          "value": "builtin_type"
+        },
+        {
+          "type": "SYMBOL",
           "name": "_expression"
         }
       ]

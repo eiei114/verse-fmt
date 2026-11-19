@@ -2,6 +2,7 @@
   "schemaVersion": 1,
   "provenance": "Self-authored verse-fmt cases; MIT OR Apache-2.0; tool/parser expectations only, UEFN acceptance pending.",
   "cases": [
+    {"id": "archetype-array-and-logic-arguments","category": "declaration","input": "Parcel := module{\nCrate := class:\n    Ready:event(logic)=event(logic){}\n    Collected:event([]int)=event([]int){}\n    F():void =\n        Use(logic{true})\n}\n","expected": "Parcel := module{\nCrate := class:\n    Ready:event(logic) = event(logic){}\n    Collected:event([]int) = event([]int){}\n    F():void =\n        Use(logic{true})\n}\n"},
     {"id": "option-block-and-comma-list","category": "collection","input": "F():void=\n  First := option{1,2}\n  Second := option:\n    Pick[]\n  Use(First,Second)\n","expected": "F():void =\n    First := option{1, 2}\n    Second := option:\n        Pick[]\n    Use(First, Second)\n"},
     {"id": "var-colon-equals","category": "declaration","input": "Parcel := module{\nCrate := class:\n  @editable\n  var Slots:[]int:=array{}\n  var Count:int=0\n}\n","expected": "Parcel := module{\nCrate := class:\n  @editable\n  var Slots:[]int := array{}\n  var Count:int = 0\n}\n"},
     {"id": "indented-for-do","category": "control","input": "F():void=\n    for:\n        Key -> Item : Items\n        Choice := Pick[Key]\n        Choice > 0\n    do:\n        Use(Item, Choice)\n    Done()\n","expected": "F():void =\n    for:\n        Key -> Item : Items\n        Choice := Pick[Key]\n        Choice > 0\n    do:\n        Use(Item, Choice)\n    Done()\n"},

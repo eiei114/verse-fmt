@@ -81,3 +81,7 @@ Both spellings keep the same mutable binding, type and initializer fields.
 An `option` expression supports comma-separated values in braces and one
 expression in an indented body. The guard refuses a line-leading postfix
 that would attach to a previous expression across these newly accepted boundaries.
+
+Call arguments admit unambiguous array types (`[]T`) and the bare `logic`
+type keyword. `logic{...}` still parses as a logic expression, and the
+archetype keeps its call-shaped head and braced body.

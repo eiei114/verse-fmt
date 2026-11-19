@@ -250,6 +250,14 @@
           "named": true
         },
         {
+          "type": "array_type",
+          "named": true
+        },
+        {
+          "type": "builtin_type",
+          "named": true
+        },
+        {
           "type": "named_argument",
           "named": true
         },

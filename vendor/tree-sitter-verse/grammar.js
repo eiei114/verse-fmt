@@ -821,6 +821,8 @@ module.exports = grammar({
     _argument: $ => choice(
       $.named_argument,
       $.tuple_type,
+      $.array_type,
+      alias('logic', $.builtin_type),
       $._expression,
     ),
 

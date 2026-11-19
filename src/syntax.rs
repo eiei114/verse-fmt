@@ -997,6 +997,51 @@ mod tests {
     }
 
     #[test]
+    fn type_arguments_keep_the_archetype_and_logic_literal_distinct() {
+        let text = "Parcel := module{\nCrate := class:\n    Ready:event(logic)=event(logic){}\n    Collected:event([]int)=event([]int){}\n    F():void =\n        Use(logic{true})\n}\n";
+        let (_, _) = parsed(text);
+        let mut parser = Parser::new();
+        // SAFETY: same statically linked grammar as production.
+        parser
+            .set_language(&Language::new(unsafe {
+                LanguageFn::from_raw(tree_sitter_verse)
+            }))
+            .unwrap();
+        let tree = parser.parse(text, None).unwrap();
+        let root = tree.root_node();
+        let module = root
+            .named_child(0)
+            .unwrap()
+            .child_by_field_name("value")
+            .unwrap();
+        let class = module
+            .named_child(0)
+            .unwrap()
+            .child_by_field_name("value")
+            .unwrap();
+        for (index, expected) in [(0, "builtin_type"), (1, "array_type")] {
+            let initializer = class
+                .named_child(index)
+                .unwrap()
+                .child_by_field_name("default")
+                .unwrap();
+            assert_eq!(initializer.kind(), "object_construction");
+            let head = initializer.child_by_field_name("type").unwrap();
+            assert_eq!(head.kind(), "call_expression");
+            let arguments = head.child_by_field_name("arguments").unwrap();
+            assert_eq!(arguments.named_child(0).unwrap().kind(), expected);
+        }
+        let body = class
+            .named_child(2)
+            .unwrap()
+            .child_by_field_name("body")
+            .unwrap();
+        let call = body.named_child(0).unwrap();
+        let arguments = call.child_by_field_name("arguments").unwrap();
+        assert_eq!(arguments.named_child(0).unwrap().kind(), "logic_literal");
+    }
+
+    #[test]
     fn for_filter_binding_owns_its_value_and_keeps_body_separate() {
         let text =
             "F():void =\n    for (I -> S : Ss, U := Us[I], U > 0):\n        G(S, U)\n    H()\n";
