@@ -1331,6 +1331,46 @@
     }
   },
   {
+    "type": "if_block_condition",
+    "named": true,
+    "fields": {
+      "name": {
+        "multiple": true,
+        "required": false,
+        "types": [
+          {
+            "type": "identifier",
+            "named": true
+          }
+        ]
+      },
+      "value": {
+        "multiple": true,
+        "required": false,
+        "types": [
+          {
+            "type": "_expression",
+            "named": true
+          }
+        ]
+      }
+    },
+    "children": {
+      "multiple": true,
+      "required": false,
+      "types": [
+        {
+          "type": "_expression",
+          "named": true
+        },
+        {
+          "type": "set_statement",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
     "type": "if_condition",
     "named": true,
     "fields": {
@@ -1400,6 +1440,10 @@
         "multiple": true,
         "required": true,
         "types": [
+          {
+            "type": "if_block_condition",
+            "named": true
+          },
           {
             "type": "if_condition",
             "named": true

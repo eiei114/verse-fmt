@@ -479,6 +479,43 @@ mod tests {
     }
 
     #[test]
+    fn indented_if_condition_keeps_each_line_as_its_own_item() {
+        let text = "F():void =\n    if:\n        Value := Values[0]\n        set Seen[Value] = true\n        not Blocked[Value]\n    then:\n        Print(\"ok\")\n";
+        let (_, _) = parsed(text);
+        let mut parser = Parser::new();
+        // SAFETY: same statically linked grammar as production.
+        let language = Language::new(unsafe { LanguageFn::from_raw(tree_sitter_verse) });
+        parser.set_language(&language).unwrap();
+        let tree = parser.parse(text, None).unwrap();
+        assert!(!tree.root_node().has_error());
+        let mut pending = vec![tree.root_node()];
+        let mut condition = None;
+        while let Some(node) = pending.pop() {
+            if node.kind() == "if_block_condition" {
+                condition = Some(node);
+                break;
+            }
+            let mut cursor = node.walk();
+            pending.extend(node.named_children(&mut cursor));
+        }
+        let condition = condition.unwrap();
+        let mut cursor = condition.walk();
+        let items: Vec<_> = condition
+            .named_children(&mut cursor)
+            .map(|node| node.utf8_text(text.as_bytes()).unwrap().to_owned())
+            .collect();
+        assert_eq!(
+            items,
+            [
+                "Value",
+                "Values[0]",
+                "set Seen[Value] = true",
+                "not Blocked[Value]"
+            ]
+        );
+    }
+
+    #[test]
     fn set_condition_and_key_value_iterator_keep_their_owners() {
         let text = "F():void =\n    if (set Values[Index] = Value):\n        Print(\"ok\")\n    for (Key -> Value : Values):\n        Print(Value)\n";
         let (_, _) = parsed(text);

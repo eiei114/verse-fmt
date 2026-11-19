@@ -19,7 +19,8 @@ explicit revision/hash change and regression tests, not a build-time download.
 Local reproducible delta from that source revision: allow local dotted names in
 `using { ... }`, initialized typed constants at file scope and in executable
 blocks, comma-separated braced enum variants, empty class base lists, if-binding
-conditions, failable indexed `set` conditions, key/value iterators, and tested
+conditions (one item per line in the indented `if:` form), failable indexed
+`set` conditions, key/value iterators, and tested
 indented object/array construction with anonymous field initializers. Generated
 metadata targets ABI 15. The generated parser requires the upstream tree-sitter
 0.25.10 runtime headers retained in `LICENSE-tree-sitter` under their separate
