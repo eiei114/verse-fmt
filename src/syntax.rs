@@ -185,11 +185,14 @@ impl Document {
                 )
                 && matches!(operator.kind(), "+" | "-")
             {
-                // Only the gap between the operands is scanned, so a long
-                // single-line expression stays linear.
+                // A dedent can put trailing newline bytes in the left node.
+                // Scan from its last non-whitespace byte to the operator.
+                let bytes = source.text().as_bytes();
+                let left_start = left.start_byte() + source.body_start();
                 let left_end = left.end_byte() + source.body_start();
+                let content_end = left_start + bytes[left_start..left_end].trim_ascii_end().len();
                 let start = operator.start_byte() + source.body_start();
-                if source.text().as_bytes()[left_end..start].contains(&b'\n') {
+                if bytes[content_end..start].contains(&b'\n') {
                     guard = Some(Failure::guarded(
                         start,
                         "binary `+`/`-` operator starts a new line; a leading unary operand is ambiguous with a continued expression in the pinned grammar",
@@ -409,6 +412,8 @@ mod tests {
     fn a_line_starting_with_unary_plus_or_minus_is_refused_not_joined() {
         for text in [
             "F():void =\n    X := A\n    -2 < A\n",
+            "F()<suspends>:void =\n    spawn:\n        G()\n    -2\n",
+            "F()<suspends>:void =\r\n    spawn:\r\n        G()\r\n    +2\r\n",
             "F():void =\n    if:\n        A := B[]\n        -2 < A\n    then:\n        G()\n",
             "F():void =\n    case(T):\n        t.A =>\n            X := A\n            +1\n        _ => {}\n",
         ] {
@@ -564,6 +569,37 @@ mod tests {
                 "set Seen[Value] = true",
                 "not Blocked[Value]"
             ]
+        );
+    }
+
+    #[test]
+    fn spawn_body_keeps_only_its_expression() {
+        let text = "F()<suspends>:void =\n    spawn:\n        G()\n    H()\n    spawn{I()}\n";
+        let (_, _) = parsed(text);
+        let mut parser = Parser::new();
+        // SAFETY: same statically linked grammar as production.
+        let language = Language::new(unsafe { LanguageFn::from_raw(tree_sitter_verse) });
+        parser.set_language(&language).unwrap();
+        let tree = parser.parse(text, None).unwrap();
+        let root = tree.root_node();
+        assert!(!root.has_error());
+        assert_eq!(root.named_child_count(), 1);
+        let function = root.named_child(0).unwrap();
+        let body = function.child_by_field_name("body").unwrap();
+        assert_eq!(body.named_child_count(), 3);
+        for (index, expected) in [(0, "G()"), (2, "I()")] {
+            let spawn = body.named_child(index).unwrap();
+            assert_eq!(spawn.kind(), "spawn_expression");
+            let call = spawn.named_child(0).unwrap();
+            assert_eq!(call.kind(), "call_expression");
+            assert_eq!(call.utf8_text(text.as_bytes()).unwrap(), expected);
+        }
+        assert_eq!(
+            body.named_child(1)
+                .unwrap()
+                .utf8_text(text.as_bytes())
+                .unwrap(),
+            "H()"
         );
     }
 

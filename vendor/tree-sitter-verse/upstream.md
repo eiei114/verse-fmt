@@ -21,7 +21,7 @@ Local reproducible delta from that source revision: allow local dotted names in
 blocks, comma-separated braced enum variants, empty class base lists, if-binding
 conditions (one item per line in the indented `if:` form), failable indexed
 `set` conditions, key/value iterators, block-bodied `case` arms
-(indented statements or `{ ... }`), and tested
+(indented statements or `{ ... }`), single-expression indented `spawn:`, and tested
 indented object/array construction with anonymous field initializers. Generated
 metadata targets ABI 15. The generated parser requires the upstream tree-sitter
 0.25.10 runtime headers retained in `LICENSE-tree-sitter` under their separate

@@ -26,6 +26,7 @@ The tool is an unreleased alpha and never replaces the UEFN compiler.
 | If-binding condition `if: Value := Expr then:` | Locally supported | Self-authored formatter/linter regression |
 | Multi-line `if:` condition block (bindings, `set`, `not`, comparisons, one per line) | Locally supported | `if-block-multi-condition` corpus case; CST item-ownership test |
 | `case` arm with indented statement block or `{ ... }` body | Locally supported; `=>` spacing preserved | `case-arm-block-bodies` corpus case; CST body-ownership test |
+| Indented `spawn:` with one expression | Locally supported | `indented-spawn` corpus case; CST body-ownership test |
 | Failable set assignment in an if condition | Locally supported in tested indexed-target form | Self-authored parser ownership and golden regression |
 | Key/value iterator `for (Key -> Value : Values)` | Locally supported in tested form | Self-authored iterator-field and golden regression |
 | Indented object/array construction and anonymous field initializer `{Z := 5}` | Locally supported in tested shape | Self-authored nested-construction regression |
@@ -51,8 +52,8 @@ Before a public supported release, extend this table with fixture IDs, compiler
 build results and real-project validation. A passing parser probe is only an
 initial signal; it is not sufficient release evidence.
 
-`tests/fixtures/corpus.json` maps 90 named inputs to independent golden output or
-refusal (66 successes, 24 refusals). Categories include normal/boundary/rejection forms, rather than merely
+`tests/fixtures/corpus.json` maps 92 named inputs to independent golden output or
+refusal (67 successes, 25 refusals). Categories include normal/boundary/rejection forms, rather than merely
 counting whitespace permutations. Calls/index brackets are compacted only at
 CST-confirmed openers; this does not distinguish failable calls from indexing
 semantically. Fixed-seed tests additionally vary indent width, BOM, EOL and

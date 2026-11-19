@@ -995,9 +995,10 @@ module.exports = grammar({
 
     spawn_expression: $ => seq(
       'spawn',
-      '{',
-      $._expression,
-      '}',
+      choice(
+        seq('{', $._expression, '}'),
+        seq(':', $._indent, $._expression, $._dedent),
+      ),
     ),
 
     when_expression: $ => seq(
