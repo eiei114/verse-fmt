@@ -1235,6 +1235,39 @@ mod tests {
     }
 
     #[test]
+    fn indented_for_keeps_indexed_set_in_its_header() {
+        let text = "F():void=\n    for:\n        Item : Items\n        not Seen[Item]\n        set Marks[Item] += array{Item}\n    do:\n        Use(Item)\n";
+        let (_, _) = parsed(text);
+        let mut parser = Parser::new();
+        // SAFETY: same statically linked grammar as production.
+        parser
+            .set_language(&Language::new(unsafe {
+                LanguageFn::from_raw(tree_sitter_verse)
+            }))
+            .unwrap();
+        let tree = parser.parse(text, None).unwrap();
+        let root = tree.root_node();
+        let body = root
+            .named_child(0)
+            .unwrap()
+            .child_by_field_name("body")
+            .unwrap();
+        let loop_node = body.named_child(0).unwrap();
+        let clauses = loop_node.child_by_field_name("clauses").unwrap();
+        assert_eq!(clauses.named_child_count(), 3);
+        let assignment = clauses.named_child(2).unwrap();
+        assert_eq!(assignment.kind(), "set_statement");
+        assert_eq!(
+            assignment.child_by_field_name("operator").unwrap().kind(),
+            "+="
+        );
+        assert_eq!(
+            loop_node.child_by_field_name("body").unwrap().kind(),
+            "colon_block"
+        );
+    }
+
+    #[test]
     fn for_filter_binding_owns_its_value_and_keeps_body_separate() {
         let text =
             "F():void =\n    for (I -> S : Ss, U := Us[I], U > 0):\n        G(S, U)\n    H()\n";

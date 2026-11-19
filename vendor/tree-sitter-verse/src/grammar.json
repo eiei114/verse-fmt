@@ -4691,6 +4691,10 @@
                   {
                     "type": "SYMBOL",
                     "name": "for_filter_binding"
+                  },
+                  {
+                    "type": "SYMBOL",
+                    "name": "set_statement"
                   }
                 ]
               },

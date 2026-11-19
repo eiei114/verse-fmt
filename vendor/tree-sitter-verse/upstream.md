@@ -102,3 +102,6 @@ A `:=` declaration can own a braced list of two or more comma-separated
 expressions. Initializer braces with `Name := Value` keep the existing
 struct-literal or construction nodes. A line-leading bare list following a
 call stays unsupported because of the possible attachment to that call.
+
+An indented `for` header can contain a `set` clause after its iterator.
+The header retains the assignment and its operator.

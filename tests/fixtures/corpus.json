@@ -2,6 +2,7 @@
   "schemaVersion": 1,
   "provenance": "Self-authored verse-fmt cases; MIT OR Apache-2.0; tool/parser expectations only, UEFN acceptance pending.",
   "cases": [
+    {"id": "for-header-set-clause","category": "control","input": "F():void=\n    for:\n        Item : Items\n        not Seen[Item]\n        set Marks[Item] += array{Item}\n    do:\n        Use(Item)\n","expected": "F():void =\n    for:\n        Item : Items\n        not Seen[Item]\n        set Marks[Item] += array{Item}\n    do:\n        Use(Item)\n"},
     {"id": "braced-expression-list","category": "collection","input": "F():void=\n    Store()\n    Values:={Read(),4}\n    Record:={Count:=2}\n    Use(Values,Record)\n","expected": "F():void =\n    Store()\n    Values := {Read(), 4}\n    Record := {Count := 2}\n    Use(Values, Record)\n"},
     {"id": "case-inline-set","category": "control","input": "F():void=\n    var Count:int = 0\n    case(Count):\n        0 => set Count = 1\n        _ => {}\n","expected": "F():void =\n    var Count:int = 0\n    case(Count):\n        0 => set Count = 1\n        _ => {}\n"},
     {"id": "empty-case-arm-before-dedent","category": "control","input": "Parcel := module{\nCrate := class:\n    Start():void =\n        case(Mode):\n            0 => Use()\n            _ =>\n\n    Stop():void =\n        Finish()\n}\n","expected": "Parcel := module{\nCrate := class:\n    Start():void =\n        case(Mode):\n            0 => Use()\n            _ =>\n\n    Stop():void =\n        Finish()\n}\n"},

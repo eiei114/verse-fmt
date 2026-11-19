@@ -1224,6 +1224,10 @@
         {
           "type": "for_iterator",
           "named": true
+        },
+        {
+          "type": "set_statement",
+          "named": true
         }
       ]
     }

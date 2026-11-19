@@ -993,7 +993,7 @@ module.exports = grammar({
     for_block_clause_list: $ => seq(
       $.for_iterator,
       optional(','),
-      repeat(seq(choice($._for_clause, $.for_filter_binding), optional(','))),
+      repeat(seq(choice($._for_clause, $.for_filter_binding, $.set_statement), optional(','))),
     ),
 
     for_clause_list: $ => seq(
