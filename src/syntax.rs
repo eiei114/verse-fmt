@@ -173,6 +173,29 @@ impl Document {
                     node.end_byte() + source.body_start(),
                 ));
             }
+            // Newlines are not separators in the pinned grammar, so a statement
+            // line that starts with unary `+`/`-` can be absorbed into the
+            // previous line as a binary operand without ERROR. Refuse instead of
+            // re-spacing an operator whose owner is uncertain.
+            if guard.is_none()
+                && node.kind() == "binary_expression"
+                && let (Some(left), Some(operator)) = (
+                    node.child_by_field_name("left"),
+                    node.child_by_field_name("operator"),
+                )
+                && matches!(operator.kind(), "+" | "-")
+            {
+                // Only the gap between the operands is scanned, so a long
+                // single-line expression stays linear.
+                let left_end = left.end_byte() + source.body_start();
+                let start = operator.start_byte() + source.body_start();
+                if source.text().as_bytes()[left_end..start].contains(&b'\n') {
+                    guard = Some(Failure::guarded(
+                        start,
+                        "binary `+`/`-` operator starts a new line; a leading unary operand is ambiguous with a continued expression in the pinned grammar",
+                    ));
+                }
+            }
             if matches!(node.kind(), "binary_expression" | "set_statement")
                 && let Some(operator) = node.child_by_field_name("operator")
             {
@@ -236,6 +259,9 @@ impl Document {
             }
             if fingerprint {
                 if shape.len() >= limits.fingerprint_events {
+                    if let Some(primary) = guard.take() {
+                        return Err(primary);
+                    }
                     return Err(Failure::new(
                         Stage::Parser,
                         node.start_byte() + source.body_start(),
@@ -380,6 +406,32 @@ mod tests {
     }
 
     #[test]
+    fn a_line_starting_with_unary_plus_or_minus_is_refused_not_joined() {
+        for text in [
+            "F():void =\n    X := A\n    -2 < A\n",
+            "F():void =\n    if:\n        A := B[]\n        -2 < A\n    then:\n        G()\n",
+            "F():void =\n    case(T):\n        t.A =>\n            X := A\n            +1\n        _ => {}\n",
+        ] {
+            let source = Source::from_bytes(text.as_bytes()).unwrap();
+            let failure = Document::parse(&source).unwrap_err();
+            assert_eq!(failure.class, Some(Class::Guard), "{text}");
+            assert!(
+                failure.message.contains("starts a new line"),
+                "{text}: {failure:?}"
+            );
+        }
+        // Same-line binary operators and a unary operand that starts its own
+        // statement after a separator keep parsing.
+        for text in [
+            "F():void =\n    X := A - 2\n",
+            "F():void =\n    X := A\n    Y := -2\n",
+        ] {
+            let source = Source::from_bytes(text.as_bytes()).unwrap();
+            assert!(Document::parse(&source).is_ok(), "{text}");
+        }
+    }
+
+    #[test]
     fn a_raw_parse_error_without_the_guard_stays_a_parse_refusal() {
         let text = "Text:=<p>Hello</p>\n";
         let source = Source::from_bytes(text.as_bytes()).unwrap();
@@ -511,6 +563,45 @@ mod tests {
                 "Values[0]",
                 "set Seen[Value] = true",
                 "not Blocked[Value]"
+            ]
+        );
+    }
+
+    #[test]
+    fn case_arm_bodies_keep_their_statements() {
+        let text = "F(T:t):void =\n    case(T):\n        t.A =>\n            C := 1\n            G(C)\n        t.B => {}\n        _ => H()\n";
+        let (_, _) = parsed(text);
+        let mut parser = Parser::new();
+        // SAFETY: same statically linked grammar as production.
+        let language = Language::new(unsafe { LanguageFn::from_raw(tree_sitter_verse) });
+        parser.set_language(&language).unwrap();
+        let tree = parser.parse(text, None).unwrap();
+        assert!(!tree.root_node().has_error());
+        let mut pending = vec![tree.root_node()];
+        let mut bodies = Vec::new();
+        while let Some(node) = pending.pop() {
+            if node.kind() == "case_arm" {
+                let body = node.child_by_field_name("body").unwrap();
+                bodies.push((
+                    body.kind().to_owned(),
+                    body.named_child_count(),
+                    body.utf8_text(text.as_bytes()).unwrap().trim().to_owned(),
+                ));
+            }
+            let mut cursor = node.walk();
+            pending.extend(node.named_children(&mut cursor));
+        }
+        bodies.sort();
+        assert_eq!(
+            bodies,
+            [
+                ("brace_block".to_owned(), 0, "{}".to_owned()),
+                ("call_expression".to_owned(), 1, "H()".to_owned()),
+                (
+                    "indented_block".to_owned(),
+                    2,
+                    "C := 1\n            G(C)".to_owned()
+                ),
             ]
         );
     }

@@ -575,6 +575,14 @@
           {
             "type": "_expression",
             "named": true
+          },
+          {
+            "type": "brace_block",
+            "named": true
+          },
+          {
+            "type": "indented_block",
+            "named": true
           }
         ]
       },
