@@ -568,6 +568,37 @@ mod tests {
     }
 
     #[test]
+    fn spawn_body_keeps_only_its_expression() {
+        let text = "F()<suspends>:void =\n    spawn:\n        G()\n    H()\n    spawn{I()}\n";
+        let (_, _) = parsed(text);
+        let mut parser = Parser::new();
+        // SAFETY: same statically linked grammar as production.
+        let language = Language::new(unsafe { LanguageFn::from_raw(tree_sitter_verse) });
+        parser.set_language(&language).unwrap();
+        let tree = parser.parse(text, None).unwrap();
+        let root = tree.root_node();
+        assert!(!root.has_error());
+        assert_eq!(root.named_child_count(), 1);
+        let function = root.named_child(0).unwrap();
+        let body = function.child_by_field_name("body").unwrap();
+        assert_eq!(body.named_child_count(), 3);
+        for (index, expected) in [(0, "G()"), (2, "I()")] {
+            let spawn = body.named_child(index).unwrap();
+            assert_eq!(spawn.kind(), "spawn_expression");
+            let call = spawn.named_child(0).unwrap();
+            assert_eq!(call.kind(), "call_expression");
+            assert_eq!(call.utf8_text(text.as_bytes()).unwrap(), expected);
+        }
+        assert_eq!(
+            body.named_child(1)
+                .unwrap()
+                .utf8_text(text.as_bytes())
+                .unwrap(),
+            "H()"
+        );
+    }
+
+    #[test]
     fn case_arm_bodies_keep_their_statements() {
         let text = "F(T:t):void =\n    case(T):\n        t.A =>\n            C := 1\n            G(C)\n        t.B => {}\n        _ => H()\n";
         let (_, _) = parsed(text);
