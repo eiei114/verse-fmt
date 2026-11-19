@@ -2,6 +2,7 @@
   "schemaVersion": 1,
   "provenance": "Self-authored verse-fmt cases; MIT OR Apache-2.0; tool/parser expectations only, UEFN acceptance pending.",
   "cases": [
+    {"id":"tuple-type-in-archetype-head", "category":"declaration", "input":"c:=class:\n  E:event(tuple(int,logic))=event(tuple(int,logic)){}\n  N:int=1\n", "expected":"c := class:\n    E:event(tuple(int, logic)) = event(tuple(int, logic)){}\n    N:int = 1\n"},
     {"id":"empty", "category":"encoding", "input":"", "expected":""},
     {"id":"bom-only", "category":"encoding", "input":"\ufeff", "expected":"\ufeff"},
     {"id":"lf-integer", "category":"literal", "input":"A:=1  \n", "expected":"A := 1\n"},

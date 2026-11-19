@@ -807,6 +807,7 @@ module.exports = grammar({
 
     _argument: $ => choice(
       $.named_argument,
+      $.tuple_type,
       $._expression,
     ),
 

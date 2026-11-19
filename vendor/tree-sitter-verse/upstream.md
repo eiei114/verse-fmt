@@ -41,3 +41,7 @@ P1 additionally accepts `identifier := range_expression` in for_iterator only.
 No scanner change or general header binding alternative accompanies this delta.
 ABI15 artifacts were regenerated with Tree-sitter CLI 0.25.10; hashes.json pins
 the changed grammar and generated outputs. See `../../docs/range-binding.md`.
+
+Call arguments admit a tuple type, including in a parametric archetype
+head such as `event(tuple(int, logic)){}`. The archetype keeps its existing
+call-shaped head and braced body.

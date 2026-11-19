@@ -691,6 +691,43 @@ mod tests {
     }
 
     #[test]
+    fn tuple_type_is_owned_by_the_archetype_head() {
+        let text = "c := class:\n    E:event(tuple(int, logic)) = event(tuple(int, logic)){}\n    N:int = 1\n";
+        let (_, _) = parsed(text);
+        let mut parser = Parser::new();
+        // SAFETY: same statically linked grammar as production.
+        let language = Language::new(unsafe { LanguageFn::from_raw(tree_sitter_verse) });
+        parser.set_language(&language).unwrap();
+        let tree = parser.parse(text, None).unwrap();
+        let root = tree.root_node();
+        assert!(!root.has_error());
+
+        let class = root
+            .named_child(0)
+            .unwrap()
+            .child_by_field_name("value")
+            .unwrap();
+        assert_eq!(class.named_child_count(), 2);
+        let field = class.named_child(0).unwrap();
+        let declared_type = field.child_by_field_name("type").unwrap();
+        assert_eq!(
+            declared_type
+                .child_by_field_name("argument")
+                .unwrap()
+                .kind(),
+            "tuple_type"
+        );
+        let initializer = field.child_by_field_name("default").unwrap();
+        assert_eq!(initializer.kind(), "object_construction");
+        let head = initializer.child_by_field_name("type").unwrap();
+        assert_eq!(head.kind(), "call_expression");
+        let arguments = head.child_by_field_name("arguments").unwrap();
+        assert_eq!(arguments.named_child_count(), 1);
+        assert_eq!(arguments.named_child(0).unwrap().kind(), "tuple_type");
+        assert_eq!(class.named_child(1).unwrap().kind(), "field_declaration");
+    }
+
+    #[test]
     fn guards_recovery_and_unsupported_constructs() {
         for text in [
             "<# missing",
