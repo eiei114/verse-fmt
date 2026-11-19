@@ -886,13 +886,15 @@ module.exports = grammar({
       '}',
     ),
 
-    // option{expr}
     option_expression: $ => seq(
       'option',
-      '{',
-      $._expression,
-      '}',
+      choice(
+        seq('{', $._expression, repeat(seq(',', field('additional_value', $._expression))), '}'),
+        $.indented_option_value,
+      ),
     ),
+
+    indented_option_value: $ => seq(':', $._indent, $._expression, $._dedent),
 
     // ─────────────────────────────────────────────
     // Control flow

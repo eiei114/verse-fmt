@@ -1587,6 +1587,21 @@
     }
   },
   {
+    "type": "indented_option_value",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": false,
+      "required": true,
+      "types": [
+        {
+          "type": "_expression",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
     "type": "index_expression",
     "named": true,
     "fields": {
@@ -2024,13 +2039,28 @@
   {
     "type": "option_expression",
     "named": true,
-    "fields": {},
+    "fields": {
+      "additional_value": {
+        "multiple": true,
+        "required": false,
+        "types": [
+          {
+            "type": "_expression",
+            "named": true
+          }
+        ]
+      }
+    },
     "children": {
       "multiple": false,
       "required": true,
       "types": [
         {
           "type": "_expression",
+          "named": true
+        },
+        {
+          "type": "indented_option_value",
           "named": true
         }
       ]

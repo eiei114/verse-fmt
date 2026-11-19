@@ -82,13 +82,13 @@ fn empty_archetype_brace_continuation(
         .then_some(source.body_start() + brace.start_byte())
 }
 
-const FOR_CLAUSE_BOUNDARY_MESSAGE: &str =
-    "ambiguous clause boundary or postfix continuation in an indented for expression";
+const INDENTED_EXPRESSION_BOUNDARY_MESSAGE: &str =
+    "ambiguous clause boundary or line-leading postfix continuation";
 
-fn ambiguous_for_clause_boundary(
+fn ambiguous_expression_boundary(
     node: tree_sitter::Node<'_>,
     bytes: &[u8],
-    in_header: bool,
+    in_checked_block: bool,
 ) -> Option<usize> {
     if node.kind() == "for_block_clause_list" {
         let mut cursor = node.walk();
@@ -120,10 +120,15 @@ fn ambiguous_for_clause_boundary(
         _ => return None,
     };
     let left = node.child_by_field_name(field)?;
-    if !in_header
+    if !in_checked_block
         && !left
             .child_by_field_name("clauses")
             .is_some_and(|clauses| clauses.kind() == "for_block_clause_list")
+        && !(left.kind() == "option_expression"
+            && (left.child_by_field_name("additional_value").is_some()
+                || left
+                    .named_child(0)
+                    .is_some_and(|value| value.kind() == "indented_option_value")))
     {
         return None;
     }
@@ -246,7 +251,7 @@ impl Document {
             .collect();
         let mut cursor = tree.walk();
         let mut depth = 0;
-        let mut for_header_depth = None;
+        let mut continuation_guard_depth = None;
         loop {
             let node = cursor.node();
             if node.kind() == "block_comment" {
@@ -281,16 +286,21 @@ impl Document {
                     ));
                 }
             }
-            if node.kind() == "for_block_clause_list" && for_header_depth.is_none() {
-                for_header_depth = Some(depth);
+            if continuation_guard_depth.is_none()
+                && (matches!(
+                    node.kind(),
+                    "for_block_clause_list" | "indented_option_value"
+                ) || node.child_by_field_name("additional_value").is_some())
+            {
+                continuation_guard_depth = Some(depth);
             }
             if guard.is_none()
                 && let Some(offset) =
-                    ambiguous_for_clause_boundary(node, bytes, for_header_depth.is_some())
+                    ambiguous_expression_boundary(node, bytes, continuation_guard_depth.is_some())
             {
                 guard = Some(Failure::guarded(
                     source.body_start() + offset,
-                    FOR_CLAUSE_BOUNDARY_MESSAGE,
+                    INDENTED_EXPRESSION_BOUNDARY_MESSAGE,
                 ));
             }
             if guard.is_none()
@@ -382,8 +392,8 @@ impl Document {
                 if fingerprint {
                     shape.push((cursor.node().kind_id(), false));
                 }
-                if for_header_depth == Some(depth) {
-                    for_header_depth = None;
+                if continuation_guard_depth == Some(depth) {
+                    continuation_guard_depth = None;
                 }
                 if cursor.goto_next_sibling() {
                     break;
@@ -878,7 +888,7 @@ mod tests {
             let source = Source::from_bytes(text.as_bytes()).unwrap();
             let error = Document::parse(&source).unwrap_err();
             assert!(
-                error.message.contains(FOR_CLAUSE_BOUNDARY_MESSAGE),
+                error.message.contains(INDENTED_EXPRESSION_BOUNDARY_MESSAGE),
                 "{joined}: {error:?}"
             );
         }
@@ -890,7 +900,7 @@ mod tests {
         let source = Source::from_bytes(text.as_bytes()).unwrap();
         let error = Document::parse(&source).unwrap_err();
         assert!(
-            error.message.contains(FOR_CLAUSE_BOUNDARY_MESSAGE),
+            error.message.contains(INDENTED_EXPRESSION_BOUNDARY_MESSAGE),
             "{error:?}"
         );
     }
@@ -925,6 +935,65 @@ mod tests {
             assert_eq!(variable.kind(), "var_declaration");
             assert_eq!(variable.child_by_field_name("value").unwrap().kind(), value);
         }
+    }
+
+    #[test]
+    fn option_values_own_their_expressions_and_leave_following_calls_separate() {
+        let text = "F():void=\n  First := option{1,2}\n  Second := option:\n    Pick[]\n  Use(First,Second)\n";
+        let (_, _) = parsed(text);
+        let mut parser = Parser::new();
+        // SAFETY: same statically linked grammar as production.
+        parser
+            .set_language(&Language::new(unsafe {
+                LanguageFn::from_raw(tree_sitter_verse)
+            }))
+            .unwrap();
+        let tree = parser.parse(text, None).unwrap();
+        let root = tree.root_node();
+        let body = root
+            .named_child(0)
+            .unwrap()
+            .child_by_field_name("body")
+            .unwrap();
+        assert_eq!(body.named_child_count(), 3);
+        let braced = body
+            .named_child(0)
+            .unwrap()
+            .child_by_field_name("value")
+            .unwrap();
+        assert_eq!(braced.kind(), "option_expression");
+        assert_eq!(braced.named_child_count(), 2);
+        assert_eq!(
+            braced
+                .child_by_field_name("additional_value")
+                .unwrap()
+                .kind(),
+            "integer_literal"
+        );
+        let indented = body
+            .named_child(1)
+            .unwrap()
+            .child_by_field_name("value")
+            .unwrap();
+        assert_eq!(indented.kind(), "option_expression");
+        let value = indented.named_child(0).unwrap();
+        assert_eq!(value.kind(), "indented_option_value");
+        assert_eq!(
+            value.named_child(0).unwrap().kind(),
+            "failable_call_expression"
+        );
+        assert_eq!(body.named_child(2).unwrap().kind(), "call_expression");
+    }
+
+    #[test]
+    fn indented_option_refuses_a_line_leading_index() {
+        let text = "F():void =\n    Value := option:\n        Pick[]\n    [0]\n";
+        let source = Source::from_bytes(text.as_bytes()).unwrap();
+        let error = Document::parse(&source).unwrap_err();
+        assert!(
+            error.message.contains(INDENTED_EXPRESSION_BOUNDARY_MESSAGE),
+            "{error:?}"
+        );
     }
 
     #[test]

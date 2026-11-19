@@ -77,3 +77,7 @@ be absorbed by the preceding expression. The same check covers a postfix on\na n
 
 A typed `var` declaration accepts `=` or `:=` before its initializer.
 Both spellings keep the same mutable binding, type and initializer fields.
+
+An `option` expression supports comma-separated values in braces and one
+expression in an indented body. The guard refuses a line-leading postfix
+that would attach to a previous expression across these newly accepted boundaries.
