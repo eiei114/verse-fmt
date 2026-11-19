@@ -832,6 +832,22 @@
                 {
                   "type": "STRING",
                   "value": ")"
+                },
+                {
+                  "type": "CHOICE",
+                  "members": [
+                    {
+                      "type": "FIELD",
+                      "name": "effect_specifiers",
+                      "content": {
+                        "type": "SYMBOL",
+                        "name": "specifier_list"
+                      }
+                    },
+                    {
+                      "type": "BLANK"
+                    }
+                  ]
                 }
               ]
             },

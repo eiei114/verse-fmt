@@ -2,6 +2,7 @@
   "schemaVersion": 1,
   "provenance": "Self-authored verse-fmt cases; MIT OR Apache-2.0; tool/parser expectations only, UEFN acceptance pending.",
   "cases": [
+    {"id":"constructor-declaration", "category":"declaration", "input":"Make<public><constructor> (Old:item)<transacts>:=item:\n  Count:=Old.Count\nOther():int=1\n", "expected":"Make<public><constructor>(Old:item)<transacts> := item:\n    Count := Old.Count\nOther():int = 1\n"},
     {"id":"for-filter-binding", "category":"control", "input":"F():void=\n  for (I -> S:Ss,U:=Us[I],U>0):\n    G(S,U)\n  H()\n", "expected":"F():void =\n    for (I -> S : Ss, U := Us[I], U > 0):\n        G(S, U)\n    H()\n"},
     {"id":"tuple-type-in-archetype-head", "category":"declaration", "input":"c:=class:\n  E:event(tuple(int,logic))=event(tuple(int,logic)){}\n  N:int=1\n", "expected":"c := class:\n    E:event(tuple(int, logic)) = event(tuple(int, logic)){}\n    N:int = 1\n"},
     {"id":"empty", "category":"encoding", "input":"", "expected":""},

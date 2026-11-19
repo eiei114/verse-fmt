@@ -27,6 +27,7 @@ The tool is an unreleased alpha and never replaces the UEFN compiler.
 | Multi-line `if:` condition block (bindings, `set`, `not`, comparisons, one per line) | Locally supported | `if-block-multi-condition` corpus case; CST item-ownership test |
 | `case` arm with indented statement block or `{ ... }` body | Locally supported; `=>` spacing preserved | `case-arm-block-bodies` corpus case; CST body-ownership test |
 | Indented `spawn:` with one expression | Locally supported | `indented-spawn` corpus case; CST body-ownership test |
+| Constructor declaration with an archetype body | Locally supported | `constructor-declaration` corpus case; CST ownership test |
 | Filter binding in a `for` header | Locally supported | `for-filter-binding` corpus case; CST ownership test |
 | Tuple type in a parametric archetype head | Locally supported | `tuple-type-in-archetype-head` corpus case; CST ownership test |
 | Failable set assignment in an if condition | Locally supported in tested indexed-target form | Self-authored parser ownership and golden regression |
@@ -54,8 +55,8 @@ Before a public supported release, extend this table with fixture IDs, compiler
 build results and real-project validation. A passing parser probe is only an
 initial signal; it is not sufficient release evidence.
 
-`tests/fixtures/corpus.json` maps 94 named inputs to independent golden output or
-refusal (70 successes, 24 refusals). Categories include normal/boundary/rejection forms, rather than merely
+`tests/fixtures/corpus.json` maps 95 named inputs to independent golden output or
+refusal (71 successes, 24 refusals). Categories include normal/boundary/rejection forms, rather than merely
 counting whitespace permutations. Calls/index brackets are compacted only at
 CST-confirmed openers; this does not distinguish failable calls from indexing
 semantically. Fixed-seed tests additionally vary indent width, BOM, EOL and

@@ -223,7 +223,12 @@ module.exports = grammar({
     type_definition: $ => seq(
       field('name', choice($.identifier, $.module_scoped_identifier)),
       optional(field('specifiers', $.specifier_list)),
-      optional(seq('(', optional(field('type_params', $.parameter_list)), ')')),
+      optional(seq(
+        '(',
+        optional(field('type_params', $.parameter_list)),
+        ')',
+        optional(field('effect_specifiers', $.specifier_list)),
+      )),
       ':=',
       field('value', choice(
         $.class_definition,

@@ -49,3 +49,7 @@ call-shaped head and braced body.
 Parenthesized `for` headers accept a later comma-delimited filter binding.
 A direct range after `:=` retains its generator node. Filter bindings are
 visible after their initializer in the loop's scope.
+
+Declarations with `<constructor>` can use parameters, effects and a
+`:=` archetype body. Ordinary parameterized `:=` definitions retain their
+existing CST ownership.

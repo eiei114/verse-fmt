@@ -211,7 +211,9 @@ impl Document {
                     | "index_expression"
                     | "function_definition"
                     | "extension_function_definition"
-            ) {
+            ) || (node.kind() == "type_definition"
+                && node.child_by_field_name("effect_specifiers").is_some())
+            {
                 let mut children = node.walk();
                 for child in node.children(&mut children) {
                     if matches!(child.kind(), "(" | "[") {
@@ -783,6 +785,47 @@ mod tests {
                 .unwrap(),
             "H()"
         );
+    }
+
+    #[test]
+    fn constructor_owns_archetype_without_reclassifying_a_type_function() {
+        let text = "Make<public><constructor>(Old:item)<transacts> := item:\n    Count := Old.Count\nAlias(T:type) := T\nOther():int = 1\n";
+        let (_, _) = parsed(text);
+        let mut parser = Parser::new();
+        // SAFETY: same statically linked grammar as production.
+        let language = Language::new(unsafe { LanguageFn::from_raw(tree_sitter_verse) });
+        parser.set_language(&language).unwrap();
+        let tree = parser.parse(text, None).unwrap();
+        let root = tree.root_node();
+        assert!(!root.has_error());
+
+        assert_eq!(root.named_child_count(), 3);
+        let constructor = root.named_child(0).unwrap();
+        assert_eq!(constructor.kind(), "type_definition");
+        assert_eq!(
+            constructor
+                .child_by_field_name("type_params")
+                .unwrap()
+                .named_child_count(),
+            1
+        );
+        assert_eq!(
+            constructor
+                .child_by_field_name("effect_specifiers")
+                .unwrap()
+                .named_child_count(),
+            1
+        );
+        let body = constructor.child_by_field_name("value").unwrap();
+        assert_eq!(body.kind(), "object_construction");
+        assert_eq!(
+            body.child_by_field_name("fields")
+                .unwrap()
+                .named_child_count(),
+            1
+        );
+        assert_eq!(root.named_child(1).unwrap().kind(), "type_definition");
+        assert_eq!(root.named_child(2).unwrap().kind(), "function_definition");
     }
 
     #[test]
