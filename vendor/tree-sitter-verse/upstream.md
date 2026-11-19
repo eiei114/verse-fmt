@@ -94,3 +94,6 @@ incomplete.
 An empty indented block can end at the same newline as its enclosing blocks.
 The scanner queues the enclosing dedents along with the phantom block's
 dedent, keeping the first following statement in its outer scope.
+
+A case arm may use an inline `set` assignment as its body. The assignment
+retains the same CST fields as a `set` inside an indented arm.

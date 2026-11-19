@@ -599,6 +599,10 @@
           {
             "type": "indented_block",
             "named": true
+          },
+          {
+            "type": "set_statement",
+            "named": true
           }
         ]
       },

@@ -4960,6 +4960,10 @@
               },
               {
                 "type": "SYMBOL",
+                "name": "set_statement"
+              },
+              {
+                "type": "SYMBOL",
                 "name": "_expression"
               }
             ]

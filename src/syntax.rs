@@ -1164,6 +1164,35 @@ mod tests {
     }
 
     #[test]
+    fn case_inline_set_owns_its_assignment() {
+        let text = "F():void=\n    var Count:int = 0\n    case(Count):\n        0 => set Count = 1\n        _ => {}\n";
+        let (_, _) = parsed(text);
+        let mut parser = Parser::new();
+        // SAFETY: same statically linked grammar as production.
+        parser
+            .set_language(&Language::new(unsafe {
+                LanguageFn::from_raw(tree_sitter_verse)
+            }))
+            .unwrap();
+        let tree = parser.parse(text, None).unwrap();
+        let root = tree.root_node();
+        let block = root
+            .named_child(0)
+            .unwrap()
+            .child_by_field_name("body")
+            .unwrap();
+        let case = block.named_child(1).unwrap();
+        assert_eq!(case.kind(), "case_expression");
+        let arm = case.named_child(1).unwrap();
+        assert_eq!(arm.kind(), "case_arm");
+        assert_eq!(
+            arm.child_by_field_name("body").unwrap().kind(),
+            "set_statement"
+        );
+        assert_eq!(case.named_child(2).unwrap().kind(), "case_arm");
+    }
+
+    #[test]
     fn for_filter_binding_owns_its_value_and_keeps_body_separate() {
         let text =
             "F():void =\n    for (I -> S : Ss, U := Us[I], U > 0):\n        G(S, U)\n    H()\n";

@@ -1049,6 +1049,7 @@ module.exports = grammar({
       field('body', choice(
         $.indented_block,
         $.brace_block,
+        $.set_statement,
         $._expression,
       )),
     ),
