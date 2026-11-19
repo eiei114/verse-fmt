@@ -13,7 +13,11 @@ pub struct Indentation {
     pub signature: Vec<(usize, usize)>,
 }
 
-pub fn analyze(source: &Source, tokens: &[Token]) -> Result<Indentation, Failure> {
+pub fn analyze(
+    source: &Source,
+    tokens: &[Token],
+    case_arm_widths: &BTreeMap<usize, usize>,
+) -> Result<Indentation, Failure> {
     let mut result = Indentation {
         replacements: BTreeMap::new(),
         blank_lines: Vec::new(),
@@ -66,7 +70,11 @@ pub fn analyze(source: &Source, tokens: &[Token]) -> Result<Indentation, Failure
                     "tab indentation cannot be safely normalized; replace it explicitly first",
                 ));
             }
-            let width = content - start;
+            let physical_width = content - start;
+            let width = case_arm_widths
+                .get(&content)
+                .copied()
+                .unwrap_or(physical_width);
             let current = *widths.last().unwrap();
             if width > current {
                 if !matches!(previous_code, ":" | "=" | ":=" | "=>") {
@@ -98,7 +106,7 @@ pub fn analyze(source: &Source, tokens: &[Token]) -> Result<Indentation, Failure
             }
             let level = widths.len() - 1;
             result.signature.push((level, 0));
-            if width != level * 4 {
+            if physical_width != level * 4 {
                 result.replacements.insert(start, " ".repeat(level * 4));
             }
         } else if code_line {
@@ -138,15 +146,19 @@ mod tests {
         let a = Source::from_bytes(b"f():void =\n  A()\n  B()\n").unwrap();
         let b = Source::from_bytes(b"f():void =\n  A()\nB()\n").unwrap();
         assert_ne!(
-            analyze(&a, &lex::scan(&a).unwrap()).unwrap().signature,
-            analyze(&b, &lex::scan(&b).unwrap()).unwrap().signature
+            analyze(&a, &lex::scan(&a).unwrap(), &BTreeMap::new())
+                .unwrap()
+                .signature,
+            analyze(&b, &lex::scan(&b).unwrap(), &BTreeMap::new())
+                .unwrap()
+                .signature
         );
     }
 
     #[test]
     fn comment_only_lines_do_not_change_the_indentation_signature() {
         let source = Source::from_bytes(b"f():void =\n    # comment\n    A()\n").unwrap();
-        let indentation = analyze(&source, &lex::scan(&source).unwrap()).unwrap();
+        let indentation = analyze(&source, &lex::scan(&source).unwrap(), &BTreeMap::new()).unwrap();
 
         assert_eq!(indentation.signature, [(0, 0), (1, 0)]);
     }
@@ -160,7 +172,7 @@ mod tests {
         ] {
             let source = Source::from_bytes(text.as_bytes()).unwrap();
             assert!(
-                analyze(&source, &lex::scan(&source).unwrap()).is_err(),
+                analyze(&source, &lex::scan(&source).unwrap(), &BTreeMap::new()).is_err(),
                 "{text}"
             );
         }

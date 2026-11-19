@@ -109,3 +109,11 @@ The header retains the assignment and its operator.
 When an indented for header starts with `Item : Read(Values)`, the adjacent
 opener keeps the call inside the first iterator. The clause boundary guard
 continues to reject a postfix attached across a newline.
+
+A final empty wildcard can be shallower than the first arm if it is
+still indented past the line that opens the case and the next content
+line closes the case (or the file ends). This exception is limited to plain
+space indentation and a bare wildcard arrow at this boundary. The
+scanner keeps the case frame open while closing any preceding arm body.
+The source check verifies the boundary using the line with the colon,
+including when the header spans multiple lines.

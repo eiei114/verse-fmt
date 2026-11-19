@@ -5043,7 +5043,7 @@
         },
         {
           "type": "SYMBOL",
-          "name": "_indent"
+          "name": "_case_indent"
         },
         {
           "type": "REPEAT1",
@@ -5416,6 +5416,10 @@
     {
       "type": "SYMBOL",
       "name": "_dedent"
+    },
+    {
+      "type": "SYMBOL",
+      "name": "_case_indent"
     },
     {
       "type": "SYMBOL",

@@ -24,6 +24,7 @@ module.exports = grammar({
   externals: $ => [
     $._indent,       // increase in indentation (after ':')
     $._dedent,       // decrease in indentation
+    $._case_indent,  // first arm of an indented case
     $.block_comment, // <# nested block comments #>
   ],
 
@@ -1059,7 +1060,7 @@ module.exports = grammar({
       field('value', $._expression),
       ')',
       ':',
-      $._indent,
+      $._case_indent,
       repeat1($.case_arm),
       $._dedent,
     ),
