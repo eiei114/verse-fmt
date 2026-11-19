@@ -2,6 +2,7 @@
   "schemaVersion": 1,
   "provenance": "Self-authored verse-fmt cases; MIT OR Apache-2.0; tool/parser expectations only, UEFN acceptance pending.",
   "cases": [
+    {"id":"empty-indented-archetype", "category":"collection", "input":"F():item=\n  A:item=item:\n  B:item=item:\n    Count:=1\n  return A\n", "expected":"F():item =\n    A:item = item:\n    B:item = item:\n        Count := 1\n    return A\n"},
     {"id":"space-before-function-effects", "category":"specifier", "input":"F (N : int) <transacts><decides> : int=\n  N\n", "expected":"F(N:int) <transacts><decides>:int =\n    N\n"},
     {"id":"indented-enum-commas", "category":"declaration", "input":"shade:=enum:\n  Light,\n  Grey\n  Dark,\nNext:int=1\n", "expected":"shade := enum:\n    Light,\n    Grey\n    Dark,\nNext:int = 1\n"},
     {"id":"constructor-declaration", "category":"declaration", "input":"Make<public><constructor> (Old:item)<transacts>:=item:\n  Count:=Old.Count\nOther():int=1\n", "expected":"Make<public><constructor>(Old:item)<transacts> := item:\n    Count := Old.Count\nOther():int = 1\n"},

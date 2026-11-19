@@ -3662,12 +3662,20 @@
                     "name": "_indent"
                   },
                   {
-                    "type": "FIELD",
-                    "name": "fields",
-                    "content": {
-                      "type": "SYMBOL",
-                      "name": "field_initializer_block"
-                    }
+                    "type": "CHOICE",
+                    "members": [
+                      {
+                        "type": "FIELD",
+                        "name": "fields",
+                        "content": {
+                          "type": "SYMBOL",
+                          "name": "field_initializer_block"
+                        }
+                      },
+                      {
+                        "type": "BLANK"
+                      }
+                    ]
                   },
                   {
                     "type": "SYMBOL",

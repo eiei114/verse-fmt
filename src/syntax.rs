@@ -56,6 +56,32 @@ pub struct Document {
     shape: Vec<(u16, bool)>,
 }
 
+const EMPTY_ARCHETYPE_BRACE_MESSAGE: &str =
+    "an empty indented archetype may have absorbed a braced expression on the next line";
+
+fn empty_archetype_brace_continuation(
+    node: tree_sitter::Node<'_>,
+    source: &Source,
+) -> Option<usize> {
+    if node.kind() != "object_construction" {
+        return None;
+    }
+    let head = node.child_by_field_name("type")?;
+    if head.kind() != "object_construction" || head.child_by_field_name("fields").is_some() {
+        return None;
+    }
+    let mut head_children = head.walk();
+    let colon = head
+        .children(&mut head_children)
+        .find(|child| child.kind() == ":")?;
+    let mut children = node.walk();
+    let brace = node
+        .children(&mut children)
+        .find(|child| child.kind() == "{")?;
+    (brace.start_position().row > colon.start_position().row)
+        .then_some(source.body_start() + brace.start_byte())
+}
+
 impl Document {
     /// Parse without collecting a trace; the crate's own tests use this, the
     /// binary always needs the trace that `--explain` prints.
@@ -198,6 +224,11 @@ impl Document {
                         "binary `+`/`-` operator starts a new line; a leading unary operand is ambiguous with a continued expression in the pinned grammar",
                     ));
                 }
+            }
+            if guard.is_none()
+                && let Some(start) = empty_archetype_brace_continuation(node, source)
+            {
+                guard = Some(Failure::guarded(start, EMPTY_ARCHETYPE_BRACE_MESSAGE));
             }
             if matches!(node.kind(), "binary_expression" | "set_statement")
                 && let Some(operator) = node.child_by_field_name("operator")
@@ -912,6 +943,60 @@ mod tests {
             comparison.child_by_field_name("operator").unwrap().kind(),
             "<"
         );
+    }
+
+    #[test]
+    fn empty_archetype_ends_before_its_sibling_statement() {
+        let text = "F():item =\n    A:item = item:\n    B:item = item:\n        Count := 1\n    return A\n";
+        let (_, _) = parsed(text);
+        let mut parser = Parser::new();
+        // SAFETY: same statically linked grammar as production.
+        let language = Language::new(unsafe { LanguageFn::from_raw(tree_sitter_verse) });
+        parser.set_language(&language).unwrap();
+        let tree = parser.parse(text, None).unwrap();
+        let root = tree.root_node();
+        assert!(!root.has_error());
+
+        let body = root
+            .named_child(0)
+            .unwrap()
+            .child_by_field_name("body")
+            .unwrap();
+        assert_eq!(body.named_child_count(), 3);
+        let empty = body
+            .named_child(0)
+            .unwrap()
+            .child_by_field_name("value")
+            .unwrap();
+        assert_eq!(empty.kind(), "object_construction");
+        assert!(empty.child_by_field_name("fields").is_none());
+        let filled = body
+            .named_child(1)
+            .unwrap()
+            .child_by_field_name("value")
+            .unwrap();
+        assert_eq!(filled.kind(), "object_construction");
+        assert_eq!(
+            filled
+                .child_by_field_name("fields")
+                .unwrap()
+                .named_child_count(),
+            1
+        );
+        assert_eq!(body.named_child(2).unwrap().kind(), "return_expression");
+    }
+
+    #[test]
+    fn refuses_expression_continuations_after_an_empty_indented_archetype() {
+        for (suffix, message) in [
+            ("{Count := 1}", EMPTY_ARCHETYPE_BRACE_MESSAGE),
+            ("-2", "a leading unary operand is ambiguous"),
+        ] {
+            let text = format!("F():void =\n    A:item = item:\n    {suffix}\n");
+            let source = Source::from_bytes(text.as_bytes()).unwrap();
+            let refusal = Document::parse(&source).expect_err("continuation must refuse");
+            assert!(refusal.message.contains(message), "{refusal:?}");
+        }
     }
 
     #[test]

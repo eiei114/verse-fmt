@@ -783,7 +783,7 @@ module.exports = grammar({
         seq(
           ':',
           $._indent,
-          field('fields', $.field_initializer_block),
+          optional(field('fields', $.field_initializer_block)),
           $._dedent,
         ),
       ),
