@@ -92,6 +92,7 @@
     {"id":"reject-tab-indent", "category":"negative-block", "input":"f():void=\n\tPrint(\"x\")\n", "reject":true},
     {"id":"reject-ambiguous-indent", "category":"negative-block", "input":"A:=1\n  B:=2\n", "reject":true},
     {"id":"reject-leading-unary-continuation", "category":"coverage", "input":"Check():void=\n    if:\n        Value:=Values[0]\n        -2<Value\n    then:\n        Print(\"ok\")\n", "reject":true},
+    {"id":"reject-unary-after-indented-spawn", "category":"coverage", "input":"F()<suspends>:void =\n    spawn:\n        G()\n    -2\n", "reject":true},
     {"id":"reject-inline-binary-body", "category":"coverage", "input":"Add(X:int,Y:int):int = X+Y\n", "reject":true}
   ]
 }

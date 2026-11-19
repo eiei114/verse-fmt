@@ -52,8 +52,8 @@ Before a public supported release, extend this table with fixture IDs, compiler
 build results and real-project validation. A passing parser probe is only an
 initial signal; it is not sufficient release evidence.
 
-`tests/fixtures/corpus.json` maps 91 named inputs to independent golden output or
-refusal (67 successes, 24 refusals). Categories include normal/boundary/rejection forms, rather than merely
+`tests/fixtures/corpus.json` maps 92 named inputs to independent golden output or
+refusal (67 successes, 25 refusals). Categories include normal/boundary/rejection forms, rather than merely
 counting whitespace permutations. Calls/index brackets are compacted only at
 CST-confirmed openers; this does not distinguish failable calls from indexing
 semantically. Fixed-seed tests additionally vary indent width, BOM, EOL and

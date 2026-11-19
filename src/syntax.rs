@@ -185,11 +185,14 @@ impl Document {
                 )
                 && matches!(operator.kind(), "+" | "-")
             {
-                // Only the gap between the operands is scanned, so a long
-                // single-line expression stays linear.
+                // A dedent can put trailing newline bytes in the left node.
+                // Scan from its last non-whitespace byte to the operator.
+                let bytes = source.text().as_bytes();
+                let left_start = left.start_byte() + source.body_start();
                 let left_end = left.end_byte() + source.body_start();
+                let content_end = left_start + bytes[left_start..left_end].trim_ascii_end().len();
                 let start = operator.start_byte() + source.body_start();
-                if source.text().as_bytes()[left_end..start].contains(&b'\n') {
+                if bytes[content_end..start].contains(&b'\n') {
                     guard = Some(Failure::guarded(
                         start,
                         "binary `+`/`-` operator starts a new line; a leading unary operand is ambiguous with a continued expression in the pinned grammar",
@@ -409,6 +412,8 @@ mod tests {
     fn a_line_starting_with_unary_plus_or_minus_is_refused_not_joined() {
         for text in [
             "F():void =\n    X := A\n    -2 < A\n",
+            "F()<suspends>:void =\n    spawn:\n        G()\n    -2\n",
+            "F()<suspends>:void =\r\n    spawn:\r\n        G()\r\n    +2\r\n",
             "F():void =\n    if:\n        A := B[]\n        -2 < A\n    then:\n        G()\n",
             "F():void =\n    case(T):\n        t.A =>\n            X := A\n            +1\n        _ => {}\n",
         ] {
