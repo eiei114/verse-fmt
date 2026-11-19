@@ -864,6 +864,57 @@ mod tests {
     }
 
     #[test]
+    fn spaced_effect_specifiers_stay_on_the_signature() {
+        let text = "F(N:int) <transacts><decides>:int =\n    F(0) < transacts > G(1)\n    N\nA := F(0) < G(1)\n";
+        let (_, _) = parsed(text);
+        let mut parser = Parser::new();
+        // SAFETY: same statically linked grammar as production.
+        let language = Language::new(unsafe { LanguageFn::from_raw(tree_sitter_verse) });
+        parser.set_language(&language).unwrap();
+        let tree = parser.parse(text, None).unwrap();
+        let root = tree.root_node();
+        assert!(!root.has_error());
+
+        assert_eq!(root.named_child_count(), 2);
+        let function = root.named_child(0).unwrap();
+        assert_eq!(function.kind(), "function_definition");
+        let list = function.child_by_field_name("effect_specifiers").unwrap();
+        assert_eq!(list.kind(), "specifier_list");
+        assert_eq!(list.named_child_count(), 2);
+        for specifier in [list.named_child(0).unwrap(), list.named_child(1).unwrap()] {
+            assert_eq!(specifier.kind(), "specifier");
+        }
+        let body = function.child_by_field_name("body").unwrap();
+        assert_eq!(body.named_child_count(), 2);
+        let first_statement = body.named_child(0).unwrap();
+        assert_eq!(first_statement.kind(), "binary_expression");
+        assert_eq!(
+            first_statement
+                .child_by_field_name("operator")
+                .unwrap()
+                .kind(),
+            "<"
+        );
+        assert_eq!(
+            body.named_child(1)
+                .unwrap()
+                .utf8_text(text.as_bytes())
+                .unwrap(),
+            "N"
+        );
+        let comparison = root
+            .named_child(1)
+            .unwrap()
+            .child_by_field_name("value")
+            .unwrap();
+        assert_eq!(comparison.kind(), "binary_expression");
+        assert_eq!(
+            comparison.child_by_field_name("operator").unwrap().kind(),
+            "<"
+        );
+    }
+
+    #[test]
     fn guards_recovery_and_unsupported_constructs() {
         for text in [
             "<# missing",

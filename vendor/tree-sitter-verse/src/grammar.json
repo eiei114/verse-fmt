@@ -563,8 +563,13 @@
               "type": "FIELD",
               "name": "effect_specifiers",
               "content": {
-                "type": "SYMBOL",
-                "name": "specifier_list"
+                "type": "ALIAS",
+                "content": {
+                  "type": "SYMBOL",
+                  "name": "_effect_specifier_list"
+                },
+                "named": true,
+                "value": "specifier_list"
               }
             },
             {
@@ -698,8 +703,13 @@
               "type": "FIELD",
               "name": "effect_specifiers",
               "content": {
-                "type": "SYMBOL",
-                "name": "specifier_list"
+                "type": "ALIAS",
+                "content": {
+                  "type": "SYMBOL",
+                  "name": "_effect_specifier_list"
+                },
+                "named": true,
+                "value": "specifier_list"
               }
             },
             {
@@ -840,8 +850,13 @@
                       "type": "FIELD",
                       "name": "effect_specifiers",
                       "content": {
-                        "type": "SYMBOL",
-                        "name": "specifier_list"
+                        "type": "ALIAS",
+                        "content": {
+                          "type": "SYMBOL",
+                          "name": "_effect_specifier_list"
+                        },
+                        "named": true,
+                        "value": "specifier_list"
                       }
                     },
                     {
@@ -1457,6 +1472,91 @@
         "type": "SYMBOL",
         "name": "specifier"
       }
+    },
+    "_effect_specifier_list": {
+      "type": "SEQ",
+      "members": [
+        {
+          "type": "ALIAS",
+          "content": {
+            "type": "SYMBOL",
+            "name": "_first_effect_specifier"
+          },
+          "named": true,
+          "value": "specifier"
+        },
+        {
+          "type": "REPEAT",
+          "content": {
+            "type": "SYMBOL",
+            "name": "specifier"
+          }
+        }
+      ]
+    },
+    "_first_effect_specifier": {
+      "type": "SEQ",
+      "members": [
+        {
+          "type": "STRING",
+          "value": "<"
+        },
+        {
+          "type": "FIELD",
+          "name": "name",
+          "content": {
+            "type": "ALIAS",
+            "content": {
+              "type": "SYMBOL",
+              "name": "_specifier_name"
+            },
+            "named": true,
+            "value": "specifier_name"
+          }
+        },
+        {
+          "type": "CHOICE",
+          "members": [
+            {
+              "type": "SEQ",
+              "members": [
+                {
+                  "type": "STRING",
+                  "value": "{"
+                },
+                {
+                  "type": "FIELD",
+                  "name": "value",
+                  "content": {
+                    "type": "CHOICE",
+                    "members": [
+                      {
+                        "type": "SYMBOL",
+                        "name": "path_literal"
+                      },
+                      {
+                        "type": "SYMBOL",
+                        "name": "identifier"
+                      }
+                    ]
+                  }
+                },
+                {
+                  "type": "STRING",
+                  "value": "}"
+                }
+              ]
+            },
+            {
+              "type": "BLANK"
+            }
+          ]
+        },
+        {
+          "type": "STRING",
+          "value": ">"
+        }
+      ]
     },
     "specifier": {
       "type": "SEQ",
