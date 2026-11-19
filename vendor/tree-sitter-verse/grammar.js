@@ -978,10 +978,15 @@ module.exports = grammar({
       $._dedent,
     ),
 
+    // Arm body: inline expression, `{ ... }` block, or indented statements.
     case_arm: $ => seq(
       field('pattern', $._expression),
       '=>',
-      field('body', $._expression),
+      field('body', choice(
+        $.indented_block,
+        $.brace_block,
+        $._expression,
+      )),
     ),
 
     sync_expression: $ => seq('sync', field('body', $._control_block)),

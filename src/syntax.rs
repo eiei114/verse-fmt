@@ -516,6 +516,45 @@ mod tests {
     }
 
     #[test]
+    fn case_arm_bodies_keep_their_statements() {
+        let text = "F(T:t):void =\n    case(T):\n        t.A =>\n            C := 1\n            G(C)\n        t.B => {}\n        _ => H()\n";
+        let (_, _) = parsed(text);
+        let mut parser = Parser::new();
+        // SAFETY: same statically linked grammar as production.
+        let language = Language::new(unsafe { LanguageFn::from_raw(tree_sitter_verse) });
+        parser.set_language(&language).unwrap();
+        let tree = parser.parse(text, None).unwrap();
+        assert!(!tree.root_node().has_error());
+        let mut pending = vec![tree.root_node()];
+        let mut bodies = Vec::new();
+        while let Some(node) = pending.pop() {
+            if node.kind() == "case_arm" {
+                let body = node.child_by_field_name("body").unwrap();
+                bodies.push((
+                    body.kind().to_owned(),
+                    body.named_child_count(),
+                    body.utf8_text(text.as_bytes()).unwrap().trim().to_owned(),
+                ));
+            }
+            let mut cursor = node.walk();
+            pending.extend(node.named_children(&mut cursor));
+        }
+        bodies.sort();
+        assert_eq!(
+            bodies,
+            [
+                ("brace_block".to_owned(), 0, "{}".to_owned()),
+                ("call_expression".to_owned(), 1, "H()".to_owned()),
+                (
+                    "indented_block".to_owned(),
+                    2,
+                    "C := 1\n            G(C)".to_owned()
+                ),
+            ]
+        );
+    }
+
+    #[test]
     fn set_condition_and_key_value_iterator_keep_their_owners() {
         let text = "F():void =\n    if (set Values[Index] = Value):\n        Print(\"ok\")\n    for (Key -> Value : Values):\n        Print(Value)\n";
         let (_, _) = parsed(text);
