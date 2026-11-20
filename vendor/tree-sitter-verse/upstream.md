@@ -157,3 +157,8 @@ A type body and an indented field-initializer block accept `;` after an item.
 An indented archetype (`point:` followed by `X := 1`) carries a dynamic
 preference over a typed definition with `:=`, so a single-field archetype is
 not read as `point:X := 1` across the line break.
+
+An inline function body may be a `set` statement. A function type may name its
+function (`type{f(X:int):int}`) as well as use `_`. A parenthesized parameter
+group may carry its own `where` clause, and `scoped{/Path, ...}` is an access
+scope expression.

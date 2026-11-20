@@ -146,6 +146,12 @@
     {"id": "type-body-semicolons", "category": "declaration", "input": "thing:=class:\n    var Count:int;\n    Reset():void;\npair:=struct{Left:int=0;Right:int=0}\n", "expected": "thing := class:\n    var Count:int;\n    Reset():void;\npair := struct{Left:int = 0; Right:int = 0}\n"},
     {"id": "archetype-colon-single-field", "category": "expression", "input": "Make():point=\n    point:\n        X:=1\nOther():point=\n    point:\n        X:=1;\n        Y:=2\n", "expected": "Make():point =\n    point:\n        X := 1\nOther():point =\n    point:\n        X := 1;\n        Y := 2\n"},
     {"id": "reject-split-type-annotation", "category": "coverage", "input": "thing := class:\n    Value:\n        X := 1\n", "reject": true},
-    {"id": "reject-hidden-missing-dedent", "category": "coverage", "input": "shade := enum:\n    Light;\n    Dark\n", "reject": true}
+    {"id": "reject-hidden-missing-dedent", "category": "coverage", "input": "shade := enum:\n    Light;\n    Dark\n", "reject": true},
+    {"id": "inline-set-body", "category": "statement", "input": "holder:=class:\n    var Data:?int=false\n    Put(Arg:int):void=set Data=option{Arg}\n", "expected": "holder := class:\n    var Data:?int = false\n    Put(Arg:int):void = set Data = option{Arg}\n"},
+    {"id": "named-function-type", "category": "declaration", "input": "handler:=type{f(X:int,Y:?int):int}\nnone:=type{g():void}\n", "expected": "handler := type{f(X:int, Y:?int):int}\nnone := type{g():void}\n"},
+    {"id": "grouped-where-parameter", "category": "declaration", "input": "Pick((X:t where t:type),Y:t):t=X\n", "expected": "Pick((X:t where t:type), Y:t):t = X\n"},
+    {"id": "scoped-expression", "category": "expression", "input": "Scope:=scoped{/Example.org/Thing}\nBoth:=scoped{/Example.org/A,/Example.org/B}\n", "expected": "Scope := scoped{/Example.org/Thing}\nBoth := scoped{/Example.org/A, /Example.org/B}\n"},
+    {"id": "reject-comment-joined-for-clauses", "category": "coverage", "input": "F():void =\n    for:\n        X : Xs <# keep\n        comment #> Y : Ys\n    do:\n        Use(X, Y)\n", "reject": true},
+    {"id": "reject-opener-after-hidden-line-break", "category": "coverage", "input": "A := F\n<# note #>(1)\n", "reject": true}
   ]
 }

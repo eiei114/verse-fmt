@@ -233,6 +233,7 @@ module.exports = grammar({
       // opener on the next line cannot extend it, because `_call_open` only
       // matches on the callee's own line.
       prec.left(0, $._expression),
+      prec.left(0, $.set_statement),
     ),
 
     // ─────────────────────────────────────────────
@@ -454,6 +455,7 @@ module.exports = grammar({
       '(',
       $._parameter,
       repeat(seq(',', $._parameter)),
+      optional($.where_clause),
       ')',
     ),
 
@@ -530,7 +532,7 @@ module.exports = grammar({
     function_type: $ => seq(
       'type',
       '{',
-      '_',
+      choice('_', field('name', $.identifier)),
       '(',
       optional($.parameter_list),
       ')',
@@ -722,6 +724,7 @@ module.exports = grammar({
       $.branch_expression,
       $.spawn_expression,
       $.defer_expression,
+      $.scoped_expression,
       $.when_expression,
       $.break_expression,
       $.return_expression,
@@ -1145,6 +1148,15 @@ module.exports = grammar({
         seq('{', $._expression, '}'),
         seq(':', $._indent, $._expression, $._dedent),
       ),
+    ),
+
+    // scoped{/Org.com/Path, ...}: an access scope value.
+    scoped_expression: $ => seq(
+      'scoped',
+      token.immediate('{'),
+      field('path', choice($.path_literal, $.identifier)),
+      repeat(seq(',', field('path', choice($.path_literal, $.identifier)))),
+      '}',
     ),
 
     // defer: INDENT stmts DEDENT, or defer { stmts }
