@@ -39,13 +39,35 @@ remaining work) adds it with recorded build results.
 | Initialized typed constants at file scope and in executable blocks | supported; UEFN compile acceptance pending | CST scope assertion; golden/idempotence fixtures | `typed-constants` |
 | Empty class base list `class()` | supported | Self-authored practical-shape regression | `empty-base-list` |
 | If-binding condition `if: Value := Expr then:` | supported | Self-authored formatter/linter regression | `if-binding` |
+| Multi-line `if:` condition block (bindings, `set`, `not`, comparisons, one per line) | supported; one condition per line | `if-block-multi-condition` corpus case; CST item-ownership test | `if-block-multi-condition` |
+| `case` arm with indented statement block or `{ ... }` body | supported; `=>` spacing preserved | `case-arm-block-bodies` corpus case; CST body-ownership test | `case-arm-block-bodies` |
+| Indented `spawn:` with one expression | supported | `indented-spawn` corpus case; CST body-ownership test | `indented-spawn` |
+| Nonempty map literal with `=>` entries | supported | `map-literal-pairs` corpus case; CST ownership test | `map-literal-pairs` |
+| Empty indented archetype | supported; ambiguous next-line braces refused | `empty-indented-archetype` corpus case; CST ownership test | `empty-indented-archetype` |
+| Whitespace before function effects | supported | `space-before-function-effects` corpus case; CST ownership test | `space-before-function-effects` |
+| Indented enum with variant commas | supported | `indented-enum-commas` corpus case; CST ownership test | `indented-enum-commas` |
+| Constructor declaration with an archetype body | supported | `constructor-declaration` corpus case; CST ownership test | `constructor-declaration` |
+| Filter binding in a `for` header | supported | `for-filter-binding` corpus case; CST ownership test | `for-filter-binding` |
+| Tuple type in a parametric archetype head | supported | `tuple-type-in-archetype-head` corpus case; CST ownership test | `tuple-type-in-archetype-head` |
 | Failable set assignment in an if condition | supported in tested indexed-target form | Self-authored parser ownership and golden regression | `failable-set` |
 | Key/value iterator `for (Key -> Value : Values)` | supported in tested form | Self-authored iterator-field and golden regression | `key-value-iterator` |
 | Indented object/array construction and anonymous field initializer `{Z := 5}` | supported in tested shape | Self-authored nested-construction regression | `indented-construction` |
-| Map literal `map{"x" => 1}` | refused (exit 2); unsupported by pinned grammar | Expanded corpus and parser probe | `map-literal` |
+| Map literal `map{"x" => 1}` | supported | Expanded corpus and parser probe | `map-literal` |
 | Top-level inline binary function body `Add(X:int,Y:int):int = X+Y` | refused (exit 2); same-line sibling ambiguity, grammar otherwise mis-splits body | Expanded corpus; explicit guard in both tools | `inline-binary-body` |
+| Statement line starting with unary `+`/`-` after another expression, e.g. `X := A` then `-2 < A` | refused (exit 2); newlines are not separators, so the grammar joins it as a binary operand | `reject-leading-unary-continuation` corpus case; guard regression in both tools | `reject-leading-unary-continuation` |
 | Guard refusal that also contains a raw parse ERROR | refused (exit 2); guard stays primary, the parse error is a secondary failure with its offset and node kind | `tests/diagnostics-stage.rs`, self-authored fixtures | `guard-with-parse-error` |
 | String beginning with unescaped `#`, e.g. `A := "# text"` | refused (exit 2); pinned scanner may misclassify | Linter rule investigation; never alter the literal to make it parse | `hash-prefixed-string` |
+| `for: ... do:` | supported; ambiguous clause boundaries refused | `indented-for-do` corpus case and CST tests | `indented-for-do` |
+| Typed `var` initializer with `:=` | supported; mutable declaration CST retained | `var-colon-equals` corpus case and CST tests | `var-colon-equals` |
+| Braced comma-separated and indented `option` expressions | supported; ambiguous postfix continuations refused | `option-block-and-comma-list` corpus case and CST tests | `option-block-and-comma-list` |
+| Array and `logic` type arguments in archetype heads | supported | `archetype-array-and-logic-arguments` corpus case and CST tests | `archetype-array-and-logic-arguments` |
+| Mixed parenthesized and indented `else if` clauses | supported | `mixed-else-if-chain` corpus case and CST tests | `mixed-else-if-chain` |
+| Empty indented case arm before an outer sibling | supported; enclosing dedents are retained | `empty-case-arm-before-dedent` corpus case and CST tests | `empty-case-arm-before-dedent` |
+| Shallower final empty `_ =>` in a case | supported when the line still belongs to the case and the following content exits it; aligned to sibling arms where normalizing block indentation | Golden, refusal and CST ownership tests | `shallower-empty-case-wildcard` |
+| Inline `set` after a case arrow | supported; the assignment belongs to its arm | `case-inline-set` corpus case and CST tests | `case-inline-set` |
+| Braced expression list in a `:=` declaration | supported with two or more comma-delimited expressions | `braced-expression-list` corpus case and CST tests | `braced-expression-list` |
+| Indexed `set` in an indented `for` header | supported | `for-header-set-clause` corpus case and CST tests | `for-header-set-clause` |
+| Adjacent call in the first indented `for` iterator | supported, with line-leading call ambiguity still refused | `for-header-iterable-call` corpus case and CST tests | `for-header-iterable-call` |
 | Malformed/unclosed input | refused (exit 2) | Recovery, delimiter, quote tests | `unclosed-block-comment`, `unclosed-string` |
 | Mixed LF/CRLF | supported; preserved exactly in `preserve`, forced conversion follows protected-span policy | Source and CLI tests | `mixed-line-endings` |
 | Bare CR, UTF-16, invalid UTF-8, NUL | refused (exit 2); never silently replaced | Source and CLI tests | `bare-cr`, `utf16-source`, `invalid-utf8`, `nul-byte` |
@@ -60,7 +82,7 @@ regions are reduced to one. Explicit EOL conversion is refused if it would
 change bytes inside a multiline string/comment.
 
 `tests/fixtures/corpus.json` maps the named inputs to independent golden output or
-explicit refusal. Corpus counts: 87 cases total, 64 golden and 23 refusal.
+explicit refusal. Corpus counts: 114 cases total, 89 golden and 25 refusal.
 That split is asserted by `tests/docs-drift.rs`, so no document can quote a
 count the fixture file contradicts. Categories include normal/boundary/rejection
 forms, rather than merely counting whitespace permutations. Calls/index brackets
@@ -90,6 +112,6 @@ has not been demonstrated.
 
 The bounded P1 extension accepts `for (I := 1..3)` range generators,
 including tested bounds, comma-separated generators/filters and nested bodies.
-It does not enable general intermediate `:=` bindings inside a header.
+Later comma-delimited clauses also accept filter bindings.
 See [range-binding scope and evidence](range-binding.md). All unsupported-form
 refusals remain tool coverage limits, not claims that Verse rejects those forms.

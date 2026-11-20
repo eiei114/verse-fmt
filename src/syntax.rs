@@ -1,5 +1,5 @@
 use std::{
-    collections::HashSet,
+    collections::{BTreeMap, HashSet},
     time::{Duration, Instant},
 };
 
@@ -49,10 +49,206 @@ unsafe extern "C" {
 #[derive(Debug)]
 pub struct Document {
     pub tokens: Vec<Token>,
+    pub case_arm_widths: BTreeMap<usize, usize>,
     pub spaced_operators: HashSet<usize>,
     pub call_openers: HashSet<usize>,
     pub spaced_for_separators: HashSet<usize>,
     shape: Vec<(u16, bool)>,
+}
+
+const EMPTY_ARCHETYPE_BRACE_MESSAGE: &str =
+    "an empty indented archetype may have absorbed a braced expression on the next line";
+
+fn empty_archetype_brace_continuation(
+    node: tree_sitter::Node<'_>,
+    source: &Source,
+) -> Option<usize> {
+    if node.kind() != "object_construction" {
+        return None;
+    }
+    let head = node.child_by_field_name("type")?;
+    if head.kind() != "object_construction" || head.child_by_field_name("fields").is_some() {
+        return None;
+    }
+    let mut head_children = head.walk();
+    let colon = head
+        .children(&mut head_children)
+        .find(|child| child.kind() == ":")?;
+    let mut children = node.walk();
+    let brace = node
+        .children(&mut children)
+        .find(|child| child.kind() == "{")?;
+    (brace.start_position().row > colon.start_position().row)
+        .then_some(source.body_start() + brace.start_byte())
+}
+
+const INDENTED_EXPRESSION_BOUNDARY_MESSAGE: &str =
+    "ambiguous clause boundary or line-leading postfix continuation";
+
+fn ends_with_empty_case_arm(node: tree_sitter::Node<'_>) -> bool {
+    if node.kind() != "case_expression" {
+        return false;
+    }
+    let mut cursor = node.walk();
+    let Some(body) = node
+        .named_children(&mut cursor)
+        .filter(|child| child.kind() == "case_arm")
+        .last()
+        .and_then(|arm| arm.child_by_field_name("body"))
+        .filter(|body| body.kind() == "indented_block")
+    else {
+        return false;
+    };
+    let mut cursor = body.walk();
+    !body
+        .named_children(&mut cursor)
+        .any(|child| !child.is_extra())
+}
+
+/// The option's value is its first named child that is not a comment, so a
+/// comment between `option` and `:` cannot hide the indented form.
+fn option_value_is_indented(option: tree_sitter::Node<'_>) -> bool {
+    let mut cursor = option.walk();
+    option
+        .named_children(&mut cursor)
+        .find(|child| !child.is_extra())
+        .is_some_and(|value| value.kind() == "indented_option_value")
+}
+
+const CASE_INDENT_BOUNDARY_MESSAGE: &str = "ambiguous indentation around an empty case arm";
+
+// A case frame's first arm column is sufficient for most layouts. For a
+// shallower empty wildcard, verify its ownership against the source line
+// containing the colon, which can differ from the enclosing scanner frame.
+fn shallow_empty_case_arm(
+    node: tree_sitter::Node<'_>,
+    bytes: &[u8],
+) -> Result<Option<(usize, usize)>, usize> {
+    if node.kind() != "case_expression" {
+        return Ok(None);
+    }
+    let mut cursor = node.walk();
+    let mut arms = node
+        .named_children(&mut cursor)
+        .filter(|child| child.kind() == "case_arm");
+    let Some(first) = arms.next() else {
+        return Ok(None);
+    };
+    let Some(last) = arms.last() else {
+        return Ok(None);
+    };
+    let start = last.start_byte();
+    let width = last.start_position().column;
+    let first_width = first.start_position().column;
+    if width >= first_width {
+        return Ok(None);
+    }
+
+    let Some(pattern) = last.child_by_field_name("pattern") else {
+        return Ok(None);
+    };
+    let Some(body) = last.child_by_field_name("body") else {
+        return Ok(None);
+    };
+    let mut cursor = body.walk();
+    if &bytes[pattern.byte_range()] != b"_"
+        || body.kind() != "indented_block"
+        || body
+            .named_children(&mut cursor)
+            .any(|child| !child.is_extra())
+    {
+        return Ok(None);
+    }
+
+    let mut cursor = node.walk();
+    let colon = node.children(&mut cursor).find(|child| child.kind() == ":");
+    let Some(colon) = colon else {
+        return Err(start);
+    };
+    let header = &bytes[..colon.start_byte()];
+    let header_line = header
+        .rsplit(|byte| matches!(byte, b'\n' | b'\r'))
+        .next()
+        .unwrap_or_default();
+    let header_width = header_line.iter().take_while(|&&b| b == b' ').count();
+    let mut cursor = last.walk();
+    let Some(arrow) = last
+        .children(&mut cursor)
+        .find(|child| child.kind() == "=>")
+    else {
+        return Err(start);
+    };
+    let tail = &bytes[arrow.end_byte()..];
+    let next = tail
+        .split(|byte| matches!(byte, b'\n' | b'\r'))
+        .skip(1)
+        .find(|line| !line.trim_ascii().is_empty());
+    if width <= header_width
+        || header_line.get(header_width) == Some(&b'\t')
+        || next.is_some_and(|line| {
+            let next_width = line.iter().take_while(|&&b| b == b' ').count();
+            next_width > header_width || line.get(next_width) == Some(&b'\t')
+        })
+    {
+        return Err(start);
+    }
+    Ok(Some((start, first_width)))
+}
+
+fn ambiguous_expression_boundary(
+    node: tree_sitter::Node<'_>,
+    bytes: &[u8],
+    in_checked_block: bool,
+) -> Option<usize> {
+    if node.kind() == "for_block_clause_list" {
+        let mut cursor = node.walk();
+        let mut previous = None::<tree_sitter::Node<'_>>;
+        for child in node.children(&mut cursor).filter(|child| !child.is_extra()) {
+            if child.kind() == "," {
+                previous = None;
+            } else {
+                if let Some(left) = previous {
+                    let left_text = bytes[left.byte_range()].trim_ascii_end();
+                    let end = left.start_byte() + left_text.len();
+                    if !bytes[end..child.start_byte()].contains(&b'\n') {
+                        return Some(child.start_byte());
+                    }
+                }
+                previous = Some(child);
+            }
+        }
+        return None;
+    }
+    // The pinned grammar can attach the start of the next clause to a
+    // previous expression as a postfix. Check the operator's own source span
+    // so parentheses inside an explicitly delimited argument stay supported.
+    let (field, opener) = match node.kind() {
+        "call_expression" => ("function", "("),
+        "failable_call_expression" => ("function", "["),
+        "index_expression" => ("object", "["),
+        "object_construction" | "map_literal" => ("type", "{"),
+        _ => return None,
+    };
+    let left = node.child_by_field_name(field)?;
+    if !in_checked_block
+        && !ends_with_empty_case_arm(left)
+        && !left
+            .child_by_field_name("clauses")
+            .is_some_and(|clauses| clauses.kind() == "for_block_clause_list")
+        && !(left.kind() == "option_expression"
+            && (left.child_by_field_name("additional_value").is_some()
+                || option_value_is_indented(left)))
+    {
+        return None;
+    }
+    let mut cursor = node.walk();
+    let next = node
+        .children(&mut cursor)
+        .find(|child| child.kind() == opener)?;
+    let end = left.start_byte() + bytes[left.byte_range()].trim_ascii_end().len();
+    bytes[end..next.start_byte()]
+        .contains(&b'\n')
+        .then_some(next.start_byte())
 }
 
 impl Document {
@@ -150,6 +346,7 @@ impl Document {
         // guard-refused source from being reclassified by a resource limit.
         let fingerprint = guard.is_none();
         let mut shape = Vec::new();
+        let mut case_arm_widths = BTreeMap::new();
         let mut spaced_operators = HashSet::new();
         let mut call_openers = HashSet::new();
         let mut spaced_for_separators = HashSet::new();
@@ -164,6 +361,7 @@ impl Document {
             .collect();
         let mut cursor = tree.walk();
         let mut depth = 0;
+        let mut continuation_guard_depth = None;
         loop {
             let node = cursor.node();
             if node.kind() == "block_comment" {
@@ -171,6 +369,68 @@ impl Document {
                     node.start_byte() + source.body_start(),
                     node.end_byte() + source.body_start(),
                 ));
+            }
+            // Newlines are not separators in the pinned grammar, so a statement
+            // line that starts with unary `+`/`-` can be absorbed into the
+            // previous line as a binary operand without ERROR. Refuse instead of
+            // re-spacing an operator whose owner is uncertain.
+            if guard.is_none()
+                && node.kind() == "binary_expression"
+                && let (Some(left), Some(operator)) = (
+                    node.child_by_field_name("left"),
+                    node.child_by_field_name("operator"),
+                )
+                && matches!(operator.kind(), "+" | "-")
+            {
+                // A dedent can put trailing newline bytes in the left node.
+                // Scan from its last non-whitespace byte to the operator.
+                let bytes = source.text().as_bytes();
+                let left_start = left.start_byte() + source.body_start();
+                let left_end = left.end_byte() + source.body_start();
+                let content_end = left_start + bytes[left_start..left_end].trim_ascii_end().len();
+                let start = operator.start_byte() + source.body_start();
+                if bytes[content_end..start].contains(&b'\n') {
+                    guard = Some(Failure::guarded(
+                        start,
+                        "binary `+`/`-` operator starts a new line; a leading unary operand is ambiguous with a continued expression in the pinned grammar",
+                    ));
+                }
+            }
+            if continuation_guard_depth.is_none()
+                && (matches!(
+                    node.kind(),
+                    "for_block_clause_list" | "indented_option_value"
+                ) || node.child_by_field_name("additional_value").is_some())
+            {
+                continuation_guard_depth = Some(depth);
+            }
+            if guard.is_none()
+                && let Some(offset) =
+                    ambiguous_expression_boundary(node, bytes, continuation_guard_depth.is_some())
+            {
+                guard = Some(Failure::guarded(
+                    source.body_start() + offset,
+                    INDENTED_EXPRESSION_BOUNDARY_MESSAGE,
+                ));
+            }
+            if guard.is_none() {
+                match shallow_empty_case_arm(node, bytes) {
+                    Ok(Some((offset, width))) => {
+                        case_arm_widths.insert(source.body_start() + offset, width);
+                    }
+                    Ok(None) => {}
+                    Err(offset) => {
+                        guard = Some(Failure::guarded(
+                            source.body_start() + offset,
+                            CASE_INDENT_BOUNDARY_MESSAGE,
+                        ));
+                    }
+                }
+            }
+            if guard.is_none()
+                && let Some(start) = empty_archetype_brace_continuation(node, source)
+            {
+                guard = Some(Failure::guarded(start, EMPTY_ARCHETYPE_BRACE_MESSAGE));
             }
             if matches!(node.kind(), "binary_expression" | "set_statement")
                 && let Some(operator) = node.child_by_field_name("operator")
@@ -184,7 +444,9 @@ impl Document {
                     | "index_expression"
                     | "function_definition"
                     | "extension_function_definition"
-            ) {
+            ) || (node.kind() == "type_definition"
+                && node.child_by_field_name("effect_specifiers").is_some())
+            {
                 let mut children = node.walk();
                 for child in node.children(&mut children) {
                     if matches!(child.kind(), "(" | "[") {
@@ -235,6 +497,9 @@ impl Document {
             }
             if fingerprint {
                 if shape.len() >= limits.fingerprint_events {
+                    if let Some(primary) = guard.take() {
+                        return Err(primary);
+                    }
                     return Err(Failure::new(
                         Stage::Parser,
                         node.start_byte() + source.body_start(),
@@ -250,6 +515,9 @@ impl Document {
             loop {
                 if fingerprint {
                     shape.push((cursor.node().kind_id(), false));
+                }
+                if continuation_guard_depth == Some(depth) {
+                    continuation_guard_depth = None;
                 }
                 if cursor.goto_next_sibling() {
                     break;
@@ -267,6 +535,7 @@ impl Document {
                     }
                     return Ok(Self {
                         tokens,
+                        case_arm_widths,
                         shape,
                         spaced_operators,
                         call_openers,
@@ -379,6 +648,34 @@ mod tests {
     }
 
     #[test]
+    fn a_line_starting_with_unary_plus_or_minus_is_refused_not_joined() {
+        for text in [
+            "F():void =\n    X := A\n    -2 < A\n",
+            "F()<suspends>:void =\n    spawn:\n        G()\n    -2\n",
+            "F()<suspends>:void =\r\n    spawn:\r\n        G()\r\n    +2\r\n",
+            "F():void =\n    if:\n        A := B[]\n        -2 < A\n    then:\n        G()\n",
+            "F():void =\n    case(T):\n        t.A =>\n            X := A\n            +1\n        _ => {}\n",
+        ] {
+            let source = Source::from_bytes(text.as_bytes()).unwrap();
+            let failure = Document::parse(&source).unwrap_err();
+            assert_eq!(failure.class, Some(Class::Guard), "{text}");
+            assert!(
+                failure.message.contains("starts a new line"),
+                "{text}: {failure:?}"
+            );
+        }
+        // Same-line binary operators and a unary operand that starts its own
+        // statement after a separator keep parsing.
+        for text in [
+            "F():void =\n    X := A - 2\n",
+            "F():void =\n    X := A\n    Y := -2\n",
+        ] {
+            let source = Source::from_bytes(text.as_bytes()).unwrap();
+            assert!(Document::parse(&source).is_ok(), "{text}");
+        }
+    }
+
+    #[test]
     fn a_raw_parse_error_without_the_guard_stays_a_parse_refusal() {
         let text = "Text:=<p>Hello</p>\n";
         let source = Source::from_bytes(text.as_bytes()).unwrap();
@@ -478,6 +775,113 @@ mod tests {
     }
 
     #[test]
+    fn indented_if_condition_keeps_each_line_as_its_own_item() {
+        let text = "F():void =\n    if:\n        Value := Values[0]\n        set Seen[Value] = true\n        not Blocked[Value]\n    then:\n        Print(\"ok\")\n";
+        let (_, _) = parsed(text);
+        let mut parser = Parser::new();
+        // SAFETY: same statically linked grammar as production.
+        let language = Language::new(unsafe { LanguageFn::from_raw(tree_sitter_verse) });
+        parser.set_language(&language).unwrap();
+        let tree = parser.parse(text, None).unwrap();
+        assert!(!tree.root_node().has_error());
+        let mut pending = vec![tree.root_node()];
+        let mut condition = None;
+        while let Some(node) = pending.pop() {
+            if node.kind() == "if_block_condition" {
+                condition = Some(node);
+                break;
+            }
+            let mut cursor = node.walk();
+            pending.extend(node.named_children(&mut cursor));
+        }
+        let condition = condition.unwrap();
+        let mut cursor = condition.walk();
+        let items: Vec<_> = condition
+            .named_children(&mut cursor)
+            .map(|node| node.utf8_text(text.as_bytes()).unwrap().to_owned())
+            .collect();
+        assert_eq!(
+            items,
+            [
+                "Value",
+                "Values[0]",
+                "set Seen[Value] = true",
+                "not Blocked[Value]"
+            ]
+        );
+    }
+
+    #[test]
+    fn spawn_body_keeps_only_its_expression() {
+        let text = "F()<suspends>:void =\n    spawn:\n        G()\n    H()\n    spawn{I()}\n";
+        let (_, _) = parsed(text);
+        let mut parser = Parser::new();
+        // SAFETY: same statically linked grammar as production.
+        let language = Language::new(unsafe { LanguageFn::from_raw(tree_sitter_verse) });
+        parser.set_language(&language).unwrap();
+        let tree = parser.parse(text, None).unwrap();
+        let root = tree.root_node();
+        assert!(!root.has_error());
+        assert_eq!(root.named_child_count(), 1);
+        let function = root.named_child(0).unwrap();
+        let body = function.child_by_field_name("body").unwrap();
+        assert_eq!(body.named_child_count(), 3);
+        for (index, expected) in [(0, "G()"), (2, "I()")] {
+            let spawn = body.named_child(index).unwrap();
+            assert_eq!(spawn.kind(), "spawn_expression");
+            let call = spawn.named_child(0).unwrap();
+            assert_eq!(call.kind(), "call_expression");
+            assert_eq!(call.utf8_text(text.as_bytes()).unwrap(), expected);
+        }
+        assert_eq!(
+            body.named_child(1)
+                .unwrap()
+                .utf8_text(text.as_bytes())
+                .unwrap(),
+            "H()"
+        );
+    }
+
+    #[test]
+    fn case_arm_bodies_keep_their_statements() {
+        let text = "F(T:t):void =\n    case(T):\n        t.A =>\n            C := 1\n            G(C)\n        t.B => {}\n        _ => H()\n";
+        let (_, _) = parsed(text);
+        let mut parser = Parser::new();
+        // SAFETY: same statically linked grammar as production.
+        let language = Language::new(unsafe { LanguageFn::from_raw(tree_sitter_verse) });
+        parser.set_language(&language).unwrap();
+        let tree = parser.parse(text, None).unwrap();
+        assert!(!tree.root_node().has_error());
+        let mut pending = vec![tree.root_node()];
+        let mut bodies = Vec::new();
+        while let Some(node) = pending.pop() {
+            if node.kind() == "case_arm" {
+                let body = node.child_by_field_name("body").unwrap();
+                bodies.push((
+                    body.kind().to_owned(),
+                    body.named_child_count(),
+                    body.utf8_text(text.as_bytes()).unwrap().trim().to_owned(),
+                ));
+            }
+            let mut cursor = node.walk();
+            pending.extend(node.named_children(&mut cursor));
+        }
+        bodies.sort();
+        assert_eq!(
+            bodies,
+            [
+                ("brace_block".to_owned(), 0, "{}".to_owned()),
+                ("call_expression".to_owned(), 1, "H()".to_owned()),
+                (
+                    "indented_block".to_owned(),
+                    2,
+                    "C := 1\n            G(C)".to_owned()
+                ),
+            ]
+        );
+    }
+
+    #[test]
     fn set_condition_and_key_value_iterator_keep_their_owners() {
         let text = "F():void =\n    if (set Values[Index] = Value):\n        Print(\"ok\")\n    for (Key -> Value : Values):\n        Print(Value)\n";
         let (_, _) = parsed(text);
@@ -526,6 +930,822 @@ mod tests {
     }
 
     #[test]
+    fn tuple_type_is_owned_by_the_archetype_head() {
+        let text = "c := class:\n    E:event(tuple(int, logic)) = event(tuple(int, logic)){}\n    N:int = 1\n";
+        let (_, _) = parsed(text);
+        let mut parser = Parser::new();
+        // SAFETY: same statically linked grammar as production.
+        let language = Language::new(unsafe { LanguageFn::from_raw(tree_sitter_verse) });
+        parser.set_language(&language).unwrap();
+        let tree = parser.parse(text, None).unwrap();
+        let root = tree.root_node();
+        assert!(!root.has_error());
+
+        let class = root
+            .named_child(0)
+            .unwrap()
+            .child_by_field_name("value")
+            .unwrap();
+        assert_eq!(class.named_child_count(), 2);
+        let field = class.named_child(0).unwrap();
+        let declared_type = field.child_by_field_name("type").unwrap();
+        assert_eq!(
+            declared_type
+                .child_by_field_name("argument")
+                .unwrap()
+                .kind(),
+            "tuple_type"
+        );
+        let initializer = field.child_by_field_name("default").unwrap();
+        assert_eq!(initializer.kind(), "object_construction");
+        let head = initializer.child_by_field_name("type").unwrap();
+        assert_eq!(head.kind(), "call_expression");
+        let arguments = head.child_by_field_name("arguments").unwrap();
+        assert_eq!(arguments.named_child_count(), 1);
+        assert_eq!(arguments.named_child(0).unwrap().kind(), "tuple_type");
+        assert_eq!(class.named_child(1).unwrap().kind(), "field_declaration");
+    }
+
+    #[test]
+    fn indented_for_retains_clauses_body_and_sibling() {
+        let text = "F():void=\n    for:\n        Key -> Item : Items\n        Choice := Pick[Key]\n        Choice > 0\n    do:\n        Use(Item, Choice)\n    Done()\n";
+        let (_, _) = parsed(text);
+        let mut parser = Parser::new();
+        // SAFETY: same statically linked grammar as production.
+        parser
+            .set_language(&Language::new(unsafe {
+                LanguageFn::from_raw(tree_sitter_verse)
+            }))
+            .unwrap();
+        let tree = parser.parse(text, None).unwrap();
+        let root = tree.root_node();
+        let body = root
+            .named_child(0)
+            .unwrap()
+            .child_by_field_name("body")
+            .unwrap();
+        assert_eq!(body.named_child_count(), 2);
+        let expression = body.named_child(0).unwrap();
+        assert_eq!(expression.kind(), "for_expression");
+        let clauses = expression.child_by_field_name("clauses").unwrap();
+        assert_eq!(clauses.kind(), "for_block_clause_list");
+        let mut cursor = clauses.walk();
+        assert_eq!(
+            clauses
+                .named_children(&mut cursor)
+                .map(|child| child.kind())
+                .collect::<Vec<_>>(),
+            ["for_iterator", "for_filter_binding", "binary_expression"]
+        );
+        assert_eq!(
+            expression.child_by_field_name("body").unwrap().kind(),
+            "colon_block"
+        );
+        assert_eq!(body.named_child(1).unwrap().kind(), "call_expression");
+    }
+
+    #[test]
+    fn indented_for_refuses_ambiguous_clause_boundaries() {
+        for joined in ["(0)", "[0]", "{Value := 0}"] {
+            let text = format!(
+                "F():void =\n    for:\n        Item : Items\n        {joined}\n    do:\n        Use(Item)\n"
+            );
+            let source = Source::from_bytes(text.as_bytes()).unwrap();
+            let error = Document::parse(&source).unwrap_err();
+            assert!(
+                error.message.contains(INDENTED_EXPRESSION_BOUNDARY_MESSAGE),
+                "{joined}: {error:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn indented_for_result_refuses_next_line_index() {
+        let text = "F():void =\n    Selection := for:\n        Item : Items\n    do:\n        Item\n    [0]\n";
+        let source = Source::from_bytes(text.as_bytes()).unwrap();
+        let error = Document::parse(&source).unwrap_err();
+        assert!(
+            error.message.contains(INDENTED_EXPRESSION_BOUNDARY_MESSAGE),
+            "{error:?}"
+        );
+    }
+
+    #[test]
+    fn mutable_fields_accept_both_initializer_spellings() {
+        let text = "Parcel := module{\nCrate := class:\n  @editable\n  var Slots:[]int:=array{}\n  var Count:int=0\n}\n";
+        let (_, _) = parsed(text);
+        let mut parser = Parser::new();
+        // SAFETY: same statically linked grammar as production.
+        parser
+            .set_language(&Language::new(unsafe {
+                LanguageFn::from_raw(tree_sitter_verse)
+            }))
+            .unwrap();
+        let tree = parser.parse(text, None).unwrap();
+        let root = tree.root_node();
+        let definition = root
+            .named_child(0)
+            .unwrap()
+            .child_by_field_name("value")
+            .unwrap();
+        assert_eq!(definition.kind(), "module_definition");
+        let class = definition
+            .named_child(0)
+            .unwrap()
+            .child_by_field_name("value")
+            .unwrap();
+        assert_eq!(class.kind(), "class_definition");
+        for (index, value) in [(1, "array_literal"), (2, "integer_literal")] {
+            let variable = class.named_child(index).unwrap();
+            assert_eq!(variable.kind(), "var_declaration");
+            assert_eq!(variable.child_by_field_name("value").unwrap().kind(), value);
+        }
+    }
+
+    #[test]
+    fn option_values_own_their_expressions_and_leave_following_calls_separate() {
+        let text = "F():void=\n  First := option{1,2}\n  Second := option:\n    Pick[]\n  Use(First,Second)\n";
+        let (_, _) = parsed(text);
+        let mut parser = Parser::new();
+        // SAFETY: same statically linked grammar as production.
+        parser
+            .set_language(&Language::new(unsafe {
+                LanguageFn::from_raw(tree_sitter_verse)
+            }))
+            .unwrap();
+        let tree = parser.parse(text, None).unwrap();
+        let root = tree.root_node();
+        let body = root
+            .named_child(0)
+            .unwrap()
+            .child_by_field_name("body")
+            .unwrap();
+        assert_eq!(body.named_child_count(), 3);
+        let braced = body
+            .named_child(0)
+            .unwrap()
+            .child_by_field_name("value")
+            .unwrap();
+        assert_eq!(braced.kind(), "option_expression");
+        assert_eq!(braced.named_child_count(), 2);
+        assert_eq!(
+            braced
+                .child_by_field_name("additional_value")
+                .unwrap()
+                .kind(),
+            "integer_literal"
+        );
+        let indented = body
+            .named_child(1)
+            .unwrap()
+            .child_by_field_name("value")
+            .unwrap();
+        assert_eq!(indented.kind(), "option_expression");
+        let value = indented.named_child(0).unwrap();
+        assert_eq!(value.kind(), "indented_option_value");
+        assert_eq!(
+            value.named_child(0).unwrap().kind(),
+            "failable_call_expression"
+        );
+        assert_eq!(body.named_child(2).unwrap().kind(), "call_expression");
+    }
+
+    #[test]
+    fn indented_option_refuses_a_line_leading_index() {
+        let text = "F():void =\n    Value := option:\n        Pick[]\n    [0]\n";
+        let source = Source::from_bytes(text.as_bytes()).unwrap();
+        let error = Document::parse(&source).unwrap_err();
+        assert!(
+            error.message.contains(INDENTED_EXPRESSION_BOUNDARY_MESSAGE),
+            "{error:?}"
+        );
+    }
+
+    #[test]
+    fn type_arguments_keep_the_archetype_and_logic_literal_distinct() {
+        let text = "Parcel := module{\nCrate := class:\n    Ready:event(logic)=event(logic){}\n    Collected:event([]int)=event([]int){}\n    F():void =\n        Use(logic{true})\n}\n";
+        let (_, _) = parsed(text);
+        let mut parser = Parser::new();
+        // SAFETY: same statically linked grammar as production.
+        parser
+            .set_language(&Language::new(unsafe {
+                LanguageFn::from_raw(tree_sitter_verse)
+            }))
+            .unwrap();
+        let tree = parser.parse(text, None).unwrap();
+        let root = tree.root_node();
+        let module = root
+            .named_child(0)
+            .unwrap()
+            .child_by_field_name("value")
+            .unwrap();
+        let class = module
+            .named_child(0)
+            .unwrap()
+            .child_by_field_name("value")
+            .unwrap();
+        for (index, expected) in [(0, "builtin_type"), (1, "array_type")] {
+            let initializer = class
+                .named_child(index)
+                .unwrap()
+                .child_by_field_name("default")
+                .unwrap();
+            assert_eq!(initializer.kind(), "object_construction");
+            let head = initializer.child_by_field_name("type").unwrap();
+            assert_eq!(head.kind(), "call_expression");
+            let arguments = head.child_by_field_name("arguments").unwrap();
+            assert_eq!(arguments.named_child(0).unwrap().kind(), expected);
+        }
+        let body = class
+            .named_child(2)
+            .unwrap()
+            .child_by_field_name("body")
+            .unwrap();
+        let call = body.named_child(0).unwrap();
+        let arguments = call.child_by_field_name("arguments").unwrap();
+        assert_eq!(arguments.named_child(0).unwrap().kind(), "logic_literal");
+    }
+
+    #[test]
+    fn mixed_else_if_chains_preserve_alternative_and_sibling_ownership() {
+        let text = "F():void=\n  if:\n    Ready?\n  then:\n    Start()\n  else if (Delay > 0):\n    Retry()\n  else if:\n    Expired?\n  then:\n    Stop()\n  else:\n    Wait()\n  Done()\n";
+        let (_, _) = parsed(text);
+        let mut parser = Parser::new();
+        // SAFETY: same statically linked grammar as production.
+        parser
+            .set_language(&Language::new(unsafe {
+                LanguageFn::from_raw(tree_sitter_verse)
+            }))
+            .unwrap();
+        let tree = parser.parse(text, None).unwrap();
+        let root = tree.root_node();
+        let body = root
+            .named_child(0)
+            .unwrap()
+            .child_by_field_name("body")
+            .unwrap();
+        assert_eq!(body.named_child_count(), 2);
+        let condition = body.named_child(0).unwrap();
+        assert_eq!(condition.kind(), "if_expression");
+        let alternative = condition.child_by_field_name("alternative").unwrap();
+        assert_eq!(alternative.kind(), "else_if_clause");
+        let middle = alternative.named_child(0).unwrap();
+        assert_eq!(
+            middle.child_by_field_name("condition").unwrap().kind(),
+            "if_condition"
+        );
+        let final_branch = middle.child_by_field_name("alternative").unwrap();
+        assert_eq!(final_branch.kind(), "else_if_clause");
+        assert_eq!(
+            final_branch
+                .child_by_field_name("condition")
+                .unwrap()
+                .kind(),
+            "if_block_condition"
+        );
+        assert_eq!(
+            final_branch
+                .child_by_field_name("alternative")
+                .unwrap()
+                .kind(),
+            "colon_block"
+        );
+        assert_eq!(body.named_child(1).unwrap().kind(), "call_expression");
+    }
+
+    #[test]
+    fn an_empty_case_arm_refuses_a_next_line_index_or_brace() {
+        for tail in ["[0]", "{Value := 1}"] {
+            let text = format!(
+                "F():void =\n    case(Mode):\n        0 => Use()\n        _ =>\n    {tail}\n"
+            );
+            let source = Source::from_bytes(text.as_bytes()).unwrap();
+            let error = Document::parse(&source).unwrap_err();
+            assert!(
+                error.message.contains(INDENTED_EXPRESSION_BOUNDARY_MESSAGE),
+                "{tail}: {error:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn shallower_empty_wildcard_is_a_sibling_and_ends_the_case() {
+        let text = "Paint():void =\n    case(Tone):\n        1 =>\n            Mix()\n     _ =>\n    Seal()\n";
+        assert!(Document::parse(&Source::from_bytes(text.as_bytes()).unwrap()).is_ok());
+        let mut parser = Parser::new();
+        // SAFETY: same statically linked grammar as production.
+        parser
+            .set_language(&Language::new(unsafe {
+                LanguageFn::from_raw(tree_sitter_verse)
+            }))
+            .unwrap();
+        let tree = parser.parse(text, None).unwrap();
+        let function = tree.root_node().named_child(0).unwrap();
+        let body = function.child_by_field_name("body").unwrap();
+        assert_eq!(body.named_child_count(), 2);
+        let case = body.named_child(0).unwrap();
+        assert_eq!(case.kind(), "case_expression");
+        assert_eq!(case.named_child_count(), 3);
+        let first = case.named_child(1).unwrap();
+        let wildcard = case.named_child(2).unwrap();
+        assert_eq!(wildcard.kind(), "case_arm");
+        assert_eq!(wildcard.start_position().column, 5);
+        assert_eq!(
+            first
+                .child_by_field_name("body")
+                .unwrap()
+                .named_child_count(),
+            1
+        );
+        let empty = wildcard.child_by_field_name("body").unwrap();
+        assert_eq!(empty.kind(), "indented_block");
+        assert_eq!(empty.named_child_count(), 0);
+        assert_eq!(body.named_child(1).unwrap().kind(), "call_expression");
+    }
+
+    #[test]
+    fn shallow_wildcard_refuses_unverified_case_boundaries() {
+        for text in [
+            // The wildcard must extend the line that contains the colon.
+            "Paint():void =\n    case(Tone):\n        1 => Mix()\n    _ =>\n    Seal()\n",
+            // This next line would start the wildcard's actual body.
+            "Paint():void =\n    case(Tone):\n        1 => Mix()\n     _ =>\n      Seal()\n",
+            // The multiline header puts the colon farther in than the wildcard.
+            "Paint():void =\n    case(\n        Tone\n      ):\n        1 => Mix()\n     _ =>\n    Seal()\n",
+        ] {
+            let source = Source::from_bytes(text.as_bytes()).unwrap();
+            assert!(Document::parse(&source).is_err(), "{text}");
+        }
+    }
+
+    #[test]
+    fn empty_case_arm_closes_before_an_outer_sibling() {
+        let text = "Parcel := module{\nCrate := class:\n    Start():void =\n        case(Mode):\n            0 => Use()\n            _ =>\n\n    Stop():void =\n        Finish()\n}\n";
+        let (_, _) = parsed(text);
+        let mut parser = Parser::new();
+        // SAFETY: same statically linked grammar as production.
+        parser
+            .set_language(&Language::new(unsafe {
+                LanguageFn::from_raw(tree_sitter_verse)
+            }))
+            .unwrap();
+        let tree = parser.parse(text, None).unwrap();
+        let root = tree.root_node();
+        let module = root
+            .named_child(0)
+            .unwrap()
+            .child_by_field_name("value")
+            .unwrap();
+        let class = module
+            .named_child(0)
+            .unwrap()
+            .child_by_field_name("value")
+            .unwrap();
+        assert_eq!(class.named_child_count(), 2);
+        let body = class
+            .named_child(0)
+            .unwrap()
+            .child_by_field_name("body")
+            .unwrap();
+        let case = body.named_child(0).unwrap();
+        assert_eq!(case.kind(), "case_expression");
+        let arm = case.named_child(2).unwrap();
+        let empty = arm.child_by_field_name("body").unwrap();
+        assert_eq!(empty.kind(), "indented_block");
+        assert_eq!(empty.named_child_count(), 0);
+        let next = class.named_child(1).unwrap();
+        assert_eq!(next.kind(), "function_definition");
+    }
+
+    #[test]
+    fn case_inline_set_owns_its_assignment() {
+        let text = "F():void=\n    var Count:int = 0\n    case(Count):\n        0 => set Count = 1\n        _ => {}\n";
+        let (_, _) = parsed(text);
+        let mut parser = Parser::new();
+        // SAFETY: same statically linked grammar as production.
+        parser
+            .set_language(&Language::new(unsafe {
+                LanguageFn::from_raw(tree_sitter_verse)
+            }))
+            .unwrap();
+        let tree = parser.parse(text, None).unwrap();
+        let root = tree.root_node();
+        let block = root
+            .named_child(0)
+            .unwrap()
+            .child_by_field_name("body")
+            .unwrap();
+        let case = block.named_child(1).unwrap();
+        assert_eq!(case.kind(), "case_expression");
+        let arm = case.named_child(1).unwrap();
+        assert_eq!(arm.kind(), "case_arm");
+        assert_eq!(
+            arm.child_by_field_name("body").unwrap().kind(),
+            "set_statement"
+        );
+        assert_eq!(case.named_child(2).unwrap().kind(), "case_arm");
+    }
+
+    #[test]
+    fn braced_expression_list_belongs_to_its_declaration() {
+        let text = "F():void=\n    Store()\n    Values:={Read(),4}\n    Record:={Count:=2}\n    Use(Values,Record)\n";
+        let (_, _) = parsed(text);
+        let mut parser = Parser::new();
+        // SAFETY: same statically linked grammar as production.
+        parser
+            .set_language(&Language::new(unsafe {
+                LanguageFn::from_raw(tree_sitter_verse)
+            }))
+            .unwrap();
+        let tree = parser.parse(text, None).unwrap();
+        let root = tree.root_node();
+        let body = root
+            .named_child(0)
+            .unwrap()
+            .child_by_field_name("body")
+            .unwrap();
+        assert_eq!(body.named_child_count(), 4);
+        assert_eq!(body.named_child(0).unwrap().kind(), "call_expression");
+        let assigned = body
+            .named_child(1)
+            .unwrap()
+            .child_by_field_name("value")
+            .unwrap();
+        assert_eq!(assigned.kind(), "braced_expression_list");
+        assert_eq!(assigned.named_child_count(), 2);
+        let record = body
+            .named_child(2)
+            .unwrap()
+            .child_by_field_name("value")
+            .unwrap();
+        assert_eq!(record.kind(), "struct_literal");
+    }
+
+    #[test]
+    fn line_leading_braced_list_after_a_call_is_refused() {
+        let text = "F():void =\n    Store()\n    {Read(), 4}\n";
+        let source = Source::from_bytes(text.as_bytes()).unwrap();
+        assert!(Document::parse(&source).is_err());
+    }
+
+    #[test]
+    fn indented_for_keeps_indexed_set_in_its_header() {
+        let text = "F():void=\n    for:\n        Item : Items\n        not Seen[Item]\n        set Marks[Item] += array{Item}\n    do:\n        Use(Item)\n";
+        let (_, _) = parsed(text);
+        let mut parser = Parser::new();
+        // SAFETY: same statically linked grammar as production.
+        parser
+            .set_language(&Language::new(unsafe {
+                LanguageFn::from_raw(tree_sitter_verse)
+            }))
+            .unwrap();
+        let tree = parser.parse(text, None).unwrap();
+        let root = tree.root_node();
+        let body = root
+            .named_child(0)
+            .unwrap()
+            .child_by_field_name("body")
+            .unwrap();
+        let loop_node = body.named_child(0).unwrap();
+        let clauses = loop_node.child_by_field_name("clauses").unwrap();
+        assert_eq!(clauses.named_child_count(), 3);
+        let assignment = clauses.named_child(2).unwrap();
+        assert_eq!(assignment.kind(), "set_statement");
+        assert_eq!(
+            assignment.child_by_field_name("operator").unwrap().kind(),
+            "+="
+        );
+        assert_eq!(
+            loop_node.child_by_field_name("body").unwrap().kind(),
+            "colon_block"
+        );
+    }
+
+    #[test]
+    fn an_adjacent_call_stays_inside_the_first_indented_iterator() {
+        let text = "F():void=\n    for:\n        Item : Fetch(Values)\n        not Seen[Item]\n        set Marks[Item] += array{Item}\n    do:\n        Use(Item)\n";
+        let (_, _) = parsed(text);
+        let mut parser = Parser::new();
+        // SAFETY: same statically linked grammar as production.
+        parser
+            .set_language(&Language::new(unsafe {
+                LanguageFn::from_raw(tree_sitter_verse)
+            }))
+            .unwrap();
+        let tree = parser.parse(text, None).unwrap();
+        let root = tree.root_node();
+        let body = root
+            .named_child(0)
+            .unwrap()
+            .child_by_field_name("body")
+            .unwrap();
+        let expression = body.named_child(0).unwrap();
+        let clauses = expression.child_by_field_name("clauses").unwrap();
+        assert_eq!(clauses.named_child_count(), 3);
+        let iterator = clauses.named_child(0).unwrap();
+        assert_eq!(iterator.kind(), "for_iterator");
+        let iterable = iterator.child_by_field_name("iterable").unwrap();
+        assert_eq!(iterable.kind(), "call_expression");
+        assert_eq!(
+            iterable
+                .child_by_field_name("function")
+                .unwrap()
+                .utf8_text(text.as_bytes())
+                .unwrap(),
+            "Fetch"
+        );
+        assert_eq!(clauses.named_child(1).unwrap().kind(), "unary_expression");
+    }
+
+    #[test]
+    fn for_filter_binding_owns_its_value_and_keeps_body_separate() {
+        let text =
+            "F():void =\n    for (I -> S : Ss, U := Us[I], U > 0):\n        G(S, U)\n    H()\n";
+        let (_, _) = parsed(text);
+        let mut parser = Parser::new();
+        // SAFETY: same statically linked grammar as production.
+        let language = Language::new(unsafe { LanguageFn::from_raw(tree_sitter_verse) });
+        parser.set_language(&language).unwrap();
+        let tree = parser.parse(text, None).unwrap();
+        let root = tree.root_node();
+        assert!(!root.has_error());
+
+        let body = root
+            .named_child(0)
+            .unwrap()
+            .child_by_field_name("body")
+            .unwrap();
+        assert_eq!(body.named_child_count(), 2);
+        let loop_node = body.named_child(0).unwrap();
+        let clauses = loop_node.child_by_field_name("clauses").unwrap();
+        assert_eq!(clauses.named_child_count(), 3);
+        assert_eq!(clauses.named_child(0).unwrap().kind(), "for_iterator");
+        let binding = clauses.named_child(1).unwrap();
+        assert_eq!(binding.kind(), "for_filter_binding");
+        assert_eq!(
+            binding
+                .child_by_field_name("name")
+                .unwrap()
+                .utf8_text(text.as_bytes())
+                .unwrap(),
+            "U"
+        );
+        assert_eq!(
+            binding
+                .child_by_field_name("value")
+                .unwrap()
+                .utf8_text(text.as_bytes())
+                .unwrap(),
+            "Us[I]"
+        );
+        assert_eq!(clauses.named_child(2).unwrap().kind(), "binary_expression");
+        assert_eq!(
+            loop_node
+                .child_by_field_name("body")
+                .unwrap()
+                .named_child_count(),
+            1
+        );
+        assert_eq!(
+            body.named_child(1)
+                .unwrap()
+                .utf8_text(text.as_bytes())
+                .unwrap(),
+            "H()"
+        );
+    }
+
+    #[test]
+    fn constructor_owns_archetype_without_reclassifying_a_type_function() {
+        let text = "Make<public><constructor>(Old:item)<transacts> := item:\n    Count := Old.Count\nAlias(T:type) := T\nOther():int = 1\n";
+        let (_, _) = parsed(text);
+        let mut parser = Parser::new();
+        // SAFETY: same statically linked grammar as production.
+        let language = Language::new(unsafe { LanguageFn::from_raw(tree_sitter_verse) });
+        parser.set_language(&language).unwrap();
+        let tree = parser.parse(text, None).unwrap();
+        let root = tree.root_node();
+        assert!(!root.has_error());
+
+        assert_eq!(root.named_child_count(), 3);
+        let constructor = root.named_child(0).unwrap();
+        assert_eq!(constructor.kind(), "type_definition");
+        assert_eq!(
+            constructor
+                .child_by_field_name("type_params")
+                .unwrap()
+                .named_child_count(),
+            1
+        );
+        assert_eq!(
+            constructor
+                .child_by_field_name("effect_specifiers")
+                .unwrap()
+                .named_child_count(),
+            1
+        );
+        let body = constructor.child_by_field_name("value").unwrap();
+        assert_eq!(body.kind(), "object_construction");
+        assert_eq!(
+            body.child_by_field_name("fields")
+                .unwrap()
+                .named_child_count(),
+            1
+        );
+        assert_eq!(root.named_child(1).unwrap().kind(), "type_definition");
+        assert_eq!(root.named_child(2).unwrap().kind(), "function_definition");
+    }
+
+    #[test]
+    fn commas_in_indented_enum_keep_variants_and_next_definition_separate() {
+        let text = "shade := enum:\n    Light,\n    Grey\n    Dark,\nNext:int = 1\n";
+        let (_, _) = parsed(text);
+        let mut parser = Parser::new();
+        // SAFETY: same statically linked grammar as production.
+        let language = Language::new(unsafe { LanguageFn::from_raw(tree_sitter_verse) });
+        parser.set_language(&language).unwrap();
+        let tree = parser.parse(text, None).unwrap();
+        let root = tree.root_node();
+        assert!(!root.has_error());
+
+        assert_eq!(root.named_child_count(), 2);
+        let variants = root
+            .named_child(0)
+            .unwrap()
+            .child_by_field_name("value")
+            .unwrap();
+        assert_eq!(variants.kind(), "enum_definition");
+        assert_eq!(variants.named_child_count(), 3);
+        for (index, name) in ["Light", "Grey", "Dark"].into_iter().enumerate() {
+            let variant = variants.named_child(index).unwrap();
+            assert_eq!(variant.kind(), "enum_variant");
+            assert_eq!(
+                variant
+                    .child_by_field_name("name")
+                    .unwrap()
+                    .utf8_text(text.as_bytes())
+                    .unwrap(),
+                name
+            );
+        }
+        assert_eq!(root.named_child(1).unwrap().kind(), "constant_declaration");
+    }
+
+    #[test]
+    fn spaced_effect_specifiers_stay_on_the_signature() {
+        let text = "F(N:int) <transacts><decides>:int =\n    F(0) < transacts > G(1)\n    N\nA := F(0) < G(1)\n";
+        let (_, _) = parsed(text);
+        let mut parser = Parser::new();
+        // SAFETY: same statically linked grammar as production.
+        let language = Language::new(unsafe { LanguageFn::from_raw(tree_sitter_verse) });
+        parser.set_language(&language).unwrap();
+        let tree = parser.parse(text, None).unwrap();
+        let root = tree.root_node();
+        assert!(!root.has_error());
+
+        assert_eq!(root.named_child_count(), 2);
+        let function = root.named_child(0).unwrap();
+        assert_eq!(function.kind(), "function_definition");
+        let list = function.child_by_field_name("effect_specifiers").unwrap();
+        assert_eq!(list.kind(), "specifier_list");
+        assert_eq!(list.named_child_count(), 2);
+        for specifier in [list.named_child(0).unwrap(), list.named_child(1).unwrap()] {
+            assert_eq!(specifier.kind(), "specifier");
+        }
+        let body = function.child_by_field_name("body").unwrap();
+        assert_eq!(body.named_child_count(), 2);
+        let first_statement = body.named_child(0).unwrap();
+        assert_eq!(first_statement.kind(), "binary_expression");
+        assert_eq!(
+            first_statement
+                .child_by_field_name("operator")
+                .unwrap()
+                .kind(),
+            "<"
+        );
+        assert_eq!(
+            body.named_child(1)
+                .unwrap()
+                .utf8_text(text.as_bytes())
+                .unwrap(),
+            "N"
+        );
+        let comparison = root
+            .named_child(1)
+            .unwrap()
+            .child_by_field_name("value")
+            .unwrap();
+        assert_eq!(comparison.kind(), "binary_expression");
+        assert_eq!(
+            comparison.child_by_field_name("operator").unwrap().kind(),
+            "<"
+        );
+    }
+
+    #[test]
+    fn empty_archetype_ends_before_its_sibling_statement() {
+        let text = "F():item =\n    A:item = item:\n    B:item = item:\n        Count := 1\n    return A\n";
+        let (_, _) = parsed(text);
+        let mut parser = Parser::new();
+        // SAFETY: same statically linked grammar as production.
+        let language = Language::new(unsafe { LanguageFn::from_raw(tree_sitter_verse) });
+        parser.set_language(&language).unwrap();
+        let tree = parser.parse(text, None).unwrap();
+        let root = tree.root_node();
+        assert!(!root.has_error());
+
+        let body = root
+            .named_child(0)
+            .unwrap()
+            .child_by_field_name("body")
+            .unwrap();
+        assert_eq!(body.named_child_count(), 3);
+        let empty = body
+            .named_child(0)
+            .unwrap()
+            .child_by_field_name("value")
+            .unwrap();
+        assert_eq!(empty.kind(), "object_construction");
+        assert!(empty.child_by_field_name("fields").is_none());
+        let filled = body
+            .named_child(1)
+            .unwrap()
+            .child_by_field_name("value")
+            .unwrap();
+        assert_eq!(filled.kind(), "object_construction");
+        assert_eq!(
+            filled
+                .child_by_field_name("fields")
+                .unwrap()
+                .named_child_count(),
+            1
+        );
+        assert_eq!(body.named_child(2).unwrap().kind(), "return_expression");
+    }
+
+    #[test]
+    fn refuses_expression_continuations_after_an_empty_indented_archetype() {
+        for (suffix, message) in [
+            ("{Count := 1}", EMPTY_ARCHETYPE_BRACE_MESSAGE),
+            ("-2", "a leading unary operand is ambiguous"),
+        ] {
+            let text = format!("F():void =\n    A:item = item:\n    {suffix}\n");
+            let source = Source::from_bytes(text.as_bytes()).unwrap();
+            let refusal = Document::parse(&source).expect_err("continuation must refuse");
+            assert!(refusal.message.contains(message), "{refusal:?}");
+        }
+    }
+
+    #[test]
+    fn map_pairs_keep_their_keys_values_and_following_statement() {
+        let text =
+            "F():void =\n    Pairs := map{Key => Value, Other => 2}\n    Empty := map{}\n    G()\n";
+        let (_, _) = parsed(text);
+        let mut parser = Parser::new();
+        // SAFETY: same statically linked grammar as production.
+        let language = Language::new(unsafe { LanguageFn::from_raw(tree_sitter_verse) });
+        parser.set_language(&language).unwrap();
+        let tree = parser.parse(text, None).unwrap();
+        let root = tree.root_node();
+        assert!(!root.has_error());
+
+        let body = root
+            .named_child(0)
+            .unwrap()
+            .child_by_field_name("body")
+            .unwrap();
+        assert_eq!(body.named_child_count(), 3);
+        let pairs = body
+            .named_child(0)
+            .unwrap()
+            .child_by_field_name("value")
+            .unwrap();
+        assert_eq!(pairs.kind(), "map_literal");
+        assert_eq!(pairs.named_child_count(), 3);
+        for (index, key, value) in [(1, "Key", "Value"), (2, "Other", "2")] {
+            let entry = pairs.named_child(index).unwrap();
+            assert_eq!(entry.kind(), "map_entry");
+            for (field, expected) in [("key", key), ("value", value)] {
+                assert_eq!(
+                    entry
+                        .child_by_field_name(field)
+                        .unwrap()
+                        .utf8_text(text.as_bytes())
+                        .unwrap(),
+                    expected
+                );
+            }
+        }
+        let empty = body
+            .named_child(1)
+            .unwrap()
+            .child_by_field_name("value")
+            .unwrap();
+        assert_eq!(empty.kind(), "object_construction");
+        assert_eq!(body.named_child(2).unwrap().kind(), "call_expression");
+    }
+
+    #[test]
     fn guards_recovery_and_unsupported_constructs() {
         for text in [
             "<# missing",
@@ -540,7 +1760,7 @@ mod tests {
             "shade := enum{Light,,Dark}\n",
             "shade := enum{,Light}\n",
             "Add(X:int,Y:int):int = X+Y\n",
-            "A := map{\"x\" => 1}\n",
+            "A := map{\"x\" => }\n",
         ] {
             let source = Source::from_bytes(text.as_bytes()).unwrap();
             assert!(Document::parse(&source).is_err(), "{text}");

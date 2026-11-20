@@ -19,7 +19,9 @@ explicit revision/hash change and regression tests, not a build-time download.
 Local reproducible delta from that source revision: allow local dotted names in
 `using { ... }`, initialized typed constants at file scope and in executable
 blocks, comma-separated braced enum variants, empty class base lists, if-binding
-conditions, failable indexed `set` conditions, key/value iterators, and tested
+conditions (one item per line in the indented `if:` form), failable indexed
+`set` conditions, key/value iterators, block-bodied `case` arms
+(indented statements or `{ ... }`), single-expression indented `spawn:`, and tested
 indented object/array construction with anonymous field initializers. Generated
 metadata targets ABI 15. The generated parser requires the upstream tree-sitter
 0.25.10 runtime headers retained in `LICENSE-tree-sitter` under their separate
@@ -36,6 +38,82 @@ The pinned base parser is not a Verse compiler and its recovery behavior remains
 insufficient for formatting safety by itself; see `../../docs/parser-design.md`.
 
 P1 additionally accepts `identifier := range_expression` in for_iterator only.
-No scanner change or general header binding alternative accompanies this delta.
+The scanner is unchanged.
 ABI15 artifacts were regenerated with Tree-sitter CLI 0.25.10; hashes.json pins
 the changed grammar and generated outputs. See `../../docs/range-binding.md`.
+
+Call arguments admit a tuple type, including in a parametric archetype
+head such as `event(tuple(int, logic)){}`. The archetype keeps its existing
+call-shaped head and braced body.
+
+Parenthesized `for` headers accept a later comma-delimited filter binding.
+A direct range after `:=` retains its generator node. Filter bindings are
+visible after their initializer in the loop's scope.
+
+Declarations with `<constructor>` can use parameters, effects and a
+`:=` archetype body. Ordinary parameterized `:=` definitions retain their
+existing CST ownership.
+
+Indented `enum:` bodies use the same variant list as braced enums, with
+optional commas between variants and after the final variant.
+
+Function signatures allow whitespace between their closing parameter
+parenthesis and first effect specifier. Comparisons retain their operator
+nodes and the remaining specifier openers retain their immediate syntax.
+
+An indented archetype may omit all field initializers. Its scanner
+indent/dedent pair still encloses the archetype and keeps following statements
+at their original scope. The syntax adapter refuses a next-line brace
+that the parser attaches to an empty archetype as another construction.
+
+Nonempty map literals reuse the `map_literal` and `map_entry` rules
+from verse-lint's `94acbac`. An entry-less `map{}` retains its existing
+archetype node.
+
+Indented `for: … do:` headers begin with an iterator. Later clauses reuse the
+parenthesized iterator and filter-binding nodes. A guard rejects same-line
+clauses without a comma and line-leading postfix openers that would otherwise
+be absorbed by the preceding expression. The same check covers a postfix on\na new line after the loop result. Loop bindings stay in the loop scope.
+
+A typed `var` declaration accepts `=` or `:=` before its initializer.
+Both spellings keep the same mutable binding, type and initializer fields.
+
+An `option` expression supports comma-separated values in braces and one
+expression in an indented body. The guard refuses a line-leading postfix
+that would attach to a previous expression across these newly accepted boundaries.
+
+Call arguments admit unambiguous array types (`[]T`) and the bare `logic`
+type keyword. `logic{...}` still parses as a logic expression, and the
+archetype keeps its call-shaped head and braced body.
+
+An indented `if: … then:` and parenthesized `if (...):` can share an
+`else if` chain. Mixed alternatives preserve the condition/body ownership
+and the following sibling. The linter marks mixed-clause semantic coverage
+incomplete.
+
+An empty indented block can end at the same newline as its enclosing blocks.
+The scanner queues the enclosing dedents along with the phantom block's
+dedent, keeping the first following statement in its outer scope.
+
+A case arm may use an inline `set` assignment as its body. The assignment
+retains the same CST fields as a `set` inside an indented arm.
+
+A `:=` declaration can own a braced list of two or more comma-separated
+expressions. Initializer braces with `Name := Value` keep the existing
+struct-literal or construction nodes. A line-leading bare list following a
+call stays unsupported because of the possible attachment to that call.
+
+An indented `for` header can contain a `set` clause after its iterator.
+The header retains the assignment and its operator.
+
+When an indented for header starts with `Item : Read(Values)`, the adjacent
+opener keeps the call inside the first iterator. The clause boundary guard
+continues to reject a postfix attached across a newline.
+
+A final empty wildcard can be shallower than the first arm if it is
+still indented past the line that opens the case and the next content
+line closes the case (or the file ends). This exception is limited to plain
+space indentation and a bare wildcard arrow at this boundary. The
+scanner keeps the case frame open while closing any preceding arm body.
+The source check verifies the boundary using the line with the colon,
+including when the header spans multiple lines.

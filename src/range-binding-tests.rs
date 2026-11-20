@@ -143,7 +143,7 @@ fn range_binding_clause_order_and_parenthesized_bounds_are_explicit() {
 }
 
 #[test]
-fn incomplete_ranges_and_unimplemented_intermediate_bindings_fail_closed() {
+fn incomplete_ranges_and_leading_nonrange_bindings_fail_closed() {
     for clause in [
         "I :=",
         "I := 1..",
@@ -151,7 +151,6 @@ fn incomplete_ranges_and_unimplemented_intermediate_bindings_fail_closed() {
         ":= 1..3",
         "I := 1..3,",
         "I := Values",
-        "I := 1..3, Twice := I * 2",
     ] {
         let text = format!("F():void =\n    for ({clause}):\n        Print(\"x\")\n");
         let source = Source::from_bytes(text.as_bytes()).unwrap();

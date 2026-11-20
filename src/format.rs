@@ -41,7 +41,7 @@ pub fn format_traced(
 ) -> Result<String, Failure> {
     let before = Document::parse_traced(source, trace)?;
     trace.enter(Stage::Structure);
-    let indentation = indent::analyze(source, &before.tokens)?;
+    let indentation = indent::analyze(source, &before.tokens, &before.case_arm_widths)?;
     trace.enter(Stage::Layout);
     let output = layout(source, &before, &indentation, options)?;
     trace.enter(Stage::Validation);
@@ -50,7 +50,7 @@ pub fn format_traced(
     let output_source = Source::from_bytes(output.as_bytes())
         .map_err(|e| Failure::new(Stage::Validation, e.offset, e.message))?;
     let after = Document::parse_traced(&output_source, trace)?;
-    let after_indentation = indent::analyze(&output_source, &after.tokens)?;
+    let after_indentation = indent::analyze(&output_source, &after.tokens, &after.case_arm_widths)?;
     if !before.equivalent(source, &after, &output_source)
         || indentation.signature != after_indentation.signature
     {
