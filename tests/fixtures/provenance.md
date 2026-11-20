@@ -10,8 +10,11 @@ They use the project's MIT OR Apache-2.0 license.
 UEFN compile and runtime acceptance have not yet been performed. Parser and
 formatter test success must not be presented as UEFN acceptance.
 
-`corpus.json` adds 87 named, categorized self-authored cases with independent
-golden outputs or explicit rejection expectations. Categories cover encodings,
+`tests/fixtures/corpus.json` adds named, categorized self-authored cases:
+Corpus counts: 114 cases total, 89 golden and 25 refusal.
+A golden case carries an independent expected output; a refusal case is an
+explicit exit 2, so the total is never a count of successes.
+Categories cover encodings,
 declarations, literals, expressions, collections, attributes/specifiers,
 statements/control, block ownership/layout and protected spans. Rejection rows
 include both malformed input and known valid-but-unsupported forms; these are

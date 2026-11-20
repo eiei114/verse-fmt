@@ -4,9 +4,14 @@ Conservative formatter for Epic Games' Verse language and UEFN projects.
 
 > Unreleased alpha under active implementation. File/stdin/project formatting,
 > configuration, check, diff and guarded Windows writes work for a bounded
-> syntax subset. The 114-case self-authored corpus and local performance baseline
-> pass, but UEFN compiler acceptance, broad-project readiness and distribution
-> checks are still pending. Unsupported syntax fails with exit code 2.
+> syntax subset. The self-authored corpus and local performance baseline pass,
+> but UEFN compiler acceptance, broad-project readiness and distribution checks
+> are still pending. Unsupported syntax fails with exit code 2.
+>
+> Corpus counts: 114 cases total, 89 golden and 25 refusal. A golden case is a
+> successful format; a refusal is an explicit exit 2, not a success. Neither
+> count is UEFN compiler evidence, and `tests/docs-drift.rs` fails when a
+> document quotes any other number.
 
 ## Usage
 

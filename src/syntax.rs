@@ -11,11 +11,10 @@ use crate::{
     source::{Class, Failure, Source, Stage, Trace, Underlying},
 };
 
-/// Documented parser limits from `docs/parser-design.md`. They are named so a
-/// test can assert the enforced value instead of repeating a literal.
-pub const MAX_PARSE_BUDGET: Duration = Duration::from_secs(2);
-pub const MAX_CST_DEPTH: usize = 512;
-pub const MAX_FINGERPRINT_EVENTS: usize = 1_000_000;
+/// Documented parser limits from `docs/parser-design.md`. They are defined in
+/// [`crate::limits`] so a test can assert the enforced value instead of
+/// repeating a literal.
+pub use crate::limits::{MAX_CST_DEPTH, MAX_FINGERPRINT_EVENTS, MAX_PARSE_BUDGET};
 
 /// The budget check as a pure predicate: "has this parse already taken longer
 /// than the documented budget?". Keeping it free of `Instant` makes the

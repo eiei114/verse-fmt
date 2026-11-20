@@ -54,6 +54,12 @@ fn practical_syntax_has_golden_output_and_is_idempotent() {
             "F():void=\n  for (I:=1..3):\n    Print(I)\n",
             "F():void =\n    for (I := 1..3):\n        Print(I)\n",
         ),
+        // Dot control bodies are parsed, not converted: the dot stays where the
+        // author wrote it, and re-formatting the result is a no-op.
+        (
+            "F():void=\n  if (true). Print(\"y\")\n  for (I:=0..3). Print(\"z\")\n",
+            "F():void =\n    if (true). Print(\"y\")\n    for (I := 0..3). Print(\"z\")\n",
+        ),
     ] {
         for source in [source, expected] {
             let dir = tempfile::tempdir().unwrap();
