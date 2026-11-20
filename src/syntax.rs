@@ -153,6 +153,58 @@ fn unseparated_item(
     }
 }
 
+/// Where the tree still carries an error that no visible node shows: descend
+/// through the first child that has one and report the end of the deepest
+/// such node, which is where a hidden MISSING token sits.
+fn hidden_error_offset(root: tree_sitter::Node<'_>) -> Option<usize> {
+    if !root.has_error() {
+        return None;
+    }
+    let mut node = root;
+    loop {
+        let mut cursor = node.walk();
+        let Some(child) = node
+            .children(&mut cursor)
+            .find(|child| child.has_error() || child.is_missing())
+        else {
+            return Some(node.end_byte());
+        };
+        node = child;
+    }
+}
+
+const SPLIT_TYPE_ANNOTATION_MESSAGE: &str = "type annotation continues on the next line; `name:` followed by an indented block is a block, not a type";
+
+/// A declaration whose type starts on a later line than its `:`. Verse reads
+/// `point:` followed by an indented block as a construction, so a tree that
+/// joined the two lines into one typed definition is not trusted.
+fn split_type_annotation(
+    node: tree_sitter::Node<'_>,
+    tokens: &[lex::Token],
+    source: &Source,
+) -> Option<usize> {
+    if !matches!(
+        node.kind(),
+        "constant_declaration" | "field_declaration" | "var_declaration" | "positional_parameter"
+    ) {
+        return None;
+    }
+    let ty = node.child_by_field_name("type")?;
+    let mut cursor = node.walk();
+    let colon = node
+        .children(&mut cursor)
+        .take_while(|child| child.start_byte() < ty.start_byte())
+        .filter(|child| child.kind() == ":")
+        .last()?;
+    let from = colon.end_byte() + source.body_start();
+    let to = ty.start_byte() + source.body_start();
+    tokens[tokens.partition_point(|t| t.range.start < from)..]
+        .iter()
+        .take_while(|t| t.range.start < to)
+        .any(|t| t.kind == lex::Kind::Newline)
+        .then_some(to)
+}
+
 const UNSEPARATED_ITEMS_MESSAGE: &str =
     "ambiguous adjacent statements on one logical line; separate them with a newline or `;`";
 
@@ -529,6 +581,11 @@ impl Document {
                 guard = Some(Failure::guarded(start, UNSEPARATED_ITEMS_MESSAGE));
             }
             if guard.is_none()
+                && let Some(start) = split_type_annotation(node, &tokens, source)
+            {
+                guard = Some(Failure::guarded(start, SPLIT_TYPE_ANNOTATION_MESSAGE));
+            }
+            if guard.is_none()
                 && let Some(start) = empty_archetype_brace_continuation(node, source)
             {
                 guard = Some(Failure::guarded(start, EMPTY_ARCHETYPE_BRACE_MESSAGE));
@@ -626,6 +683,26 @@ impl Document {
                     break;
                 }
                 if !cursor.goto_parent() {
+                    // The cursor never visits hidden terminals, so a MISSING
+                    // `_indent`/`_dedent` the parser inserted during recovery
+                    // is invisible to the walk above. The tree still records
+                    // it; refuse it like any other MISSING node.
+                    if let Some(offset) = hidden_error_offset(tree.root_node()) {
+                        let offset = offset + source.body_start();
+                        let message = "unsupported or incomplete Verse syntax; use UEFN for compiler diagnostics";
+                        let Some(primary) = guard.take() else {
+                            return Err(Failure::parse(offset, message));
+                        };
+                        return Err(primary.with_underlying(Underlying {
+                            stage: Stage::Parser,
+                            class: Class::Parse,
+                            offset,
+                            message: format!(
+                                "underlying parse error: MISSING hidden token near byte {offset}; unsupported or incomplete Verse syntax",
+                            ),
+                            node_kind: "MISSING".to_owned(),
+                        }));
+                    }
                     if let Some(primary) = guard.take() {
                         return Err(primary);
                     }
@@ -859,6 +936,52 @@ mod tests {
                 .collect::<Vec<_>>(),
             ["type_definition", "attribute", "function_definition"]
         );
+    }
+
+    #[test]
+    fn a_single_field_archetype_is_a_construction_not_a_split_typed_definition() {
+        for text in [
+            "Make():point =\n    point:\n        X := 1\n",
+            "Make():point =\n    point:\n        X := 1;\n        Y := 2\n",
+        ] {
+            let (_, _) = parsed(text);
+            let tree = raw_tree(text);
+            let body = tree
+                .root_node()
+                .named_child(0)
+                .unwrap()
+                .child_by_field_name("body")
+                .unwrap();
+            assert_eq!(
+                body.named_child(0).unwrap().kind(),
+                "object_construction",
+                "{text}"
+            );
+        }
+        // A typed definition whose type sits on the next line is refused.
+        let text = "thing := class:\n    Value:\n        X := 1\n";
+        let failure = Document::parse(&Source::from_bytes(text.as_bytes()).unwrap()).unwrap_err();
+        assert_eq!(failure.class, Some(Class::Guard));
+        assert!(
+            failure.message.contains("type annotation continues"),
+            "{failure:?}"
+        );
+        assert_eq!(failure.offset, text.find("X := 1").unwrap());
+    }
+
+    #[test]
+    fn a_hidden_missing_token_is_refused_even_though_the_walk_cannot_see_it() {
+        // The enum body takes no `;`, so recovery closes it with a MISSING
+        // `_dedent` (hidden, so the cursor never visits it) and reads the rest
+        // at file scope without any visible ERROR node. If indented enums ever
+        // accept `;`, replace this input with another hidden-token recovery.
+        let text = "shade := enum:\n    Light;\n    Dark\n";
+        let tree = raw_tree(text);
+        assert!(tree.root_node().has_error());
+        let failure = Document::parse(&Source::from_bytes(text.as_bytes()).unwrap()).unwrap_err();
+        assert_eq!(failure.class, Some(Class::Parse), "{failure:?}");
+        // A struct body that does take `;` keeps its members.
+        let (_, _) = parsed("thing := class:\n  var Count:int;\n  Reset():void;\n");
     }
 
     #[test]

@@ -152,3 +152,8 @@ see `<`: after horizontal space, on a later line at file scope, and on the next
 content line of a block when the indentation does not change. Only the comment
 bytes form the token. Before this, a block comment anywhere but at the very
 start of a scan was split into `<`, a line comment and stray tokens.
+
+A type body and an indented field-initializer block accept `;` after an item.
+An indented archetype (`point:` followed by `X := 1`) carries a dynamic
+preference over a typed definition with `:=`, so a single-field archetype is
+not read as `point:X := 1` across the line break.

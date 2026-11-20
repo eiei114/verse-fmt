@@ -313,8 +313,8 @@ module.exports = grammar({
 
     // Type body: ':' INDENT members DEDENT  OR  '{ members }'
     _type_body: $ => choice(
-      seq(':', $._indent, repeat($._class_member), $._dedent),
-      seq('{', repeat($._class_member), '}'),
+      seq(':', $._indent, repeat(seq($._class_member, optional(';'))), $._dedent),
+      seq('{', repeat(seq($._class_member, optional(';'))), '}'),
     ),
 
     _enum_body: $ => choice(
@@ -827,12 +827,15 @@ module.exports = grammar({
           optional(field('fields', $.field_initializer_list)),
           '}',
         ),
-        seq(
+        // `point:` with an indented block is a construction. A typed
+        // definition `point:X := 1` cannot take this reading's place: its
+        // type annotation never continues on the next line.
+        prec.dynamic(1, seq(
           ':',
           $._indent,
           optional(field('fields', $.field_initializer_block)),
           $._dedent,
-        ),
+        )),
       ),
     )),
 
@@ -843,7 +846,8 @@ module.exports = grammar({
 
     field_initializer_block: $ => seq(
       $.field_initializer,
-      repeat($.field_initializer),
+      repeat(seq(optional(';'), $.field_initializer)),
+      optional(';'),
     ),
 
     braced_expression_list: $ => seq(

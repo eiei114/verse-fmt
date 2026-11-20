@@ -1,9 +1,9 @@
 {
-  "grammar.js": "7c27b2dfb6609d45f1a4861f23041b9cc11159c8c9aaaee714b312ccb96ac1d4",
+  "grammar.js": "0d9a60180a9bb50d449527e65f2c39aacb07a62ee902c1776afde91d7a7612e7",
   "tree-sitter.json": "f57ee6d1a5ee6958875e13074e8cbb8d53d87bb71793291bebd9854dd87e9ad6",
-  "src/parser.c": "c2d6b52618054d6f0ffeb2bfe49974f3c0b325ff361783f5da8e529e9d4503af",
+  "src/parser.c": "4c2eb168a6ca03af072a61e578f484ab655daceec0b9165eb6c8b38379731078",
   "src/scanner.c": "e176d6c7d07f251f3bc286985c6759da85852550f1b1da376ecd88b8faf3f035",
-  "src/grammar.json": "231d8ae5ab1bc659f5dae2dcf9febeb1d137f65cef81290e57fb9aa577a224d1",
+  "src/grammar.json": "2c640778c531092083be9a23bcb4f407dd33600704ace2c861a23641af77f464",
   "src/node-types.json": "5d4b2199d3a83bf9013a5a976eb3cebda9dd5c5c794e2f877db3afa0e71f897e",
   "src/tree_sitter/alloc.h": "b29c1c9fb7cc82f58c84b376df1297d6e2737a1d655fd356db0859e3c29c2fea",
   "src/tree_sitter/array.h": "5bdf6ed1a78e3409fd443e085ca967a64c188a5d082aaf7f819bccd53a471c94",

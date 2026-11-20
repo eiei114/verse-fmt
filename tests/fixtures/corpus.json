@@ -142,6 +142,10 @@
     {"id": "accessor-specifiers", "category": "attribute", "input": "thing:=class:\n    var Count<public><getter(GetCount)><setter(SetCount)>:int=external{}\n", "expected": "thing := class:\n    var Count<public><getter(GetCount)><setter(SetCount)>:int = external{}\n"},
     {"id": "function-typed-parameter", "category": "declaration", "input": "Apply(Callback(:int):void,Value:int):void=\n    Callback(Value)\n", "expected": "Apply(Callback(:int):void, Value:int):void =\n    Callback(Value)\n"},
     {"id": "reject-comment-joined-statements", "category": "coverage", "input": "Run():void=\n    if:\n        A:=First[] <# keep\n        note #> B:=Second[]\n    then:\n        Log(\"y\")\n", "reject": true},
-    {"id": "reject-comment-joined-top-level", "category": "coverage", "input": "A:=1 <# a\n#> B:=2\n", "reject": true}
+    {"id": "reject-comment-joined-top-level", "category": "coverage", "input": "A:=1 <# a\n#> B:=2\n", "reject": true},
+    {"id": "type-body-semicolons", "category": "declaration", "input": "thing:=class:\n    var Count:int;\n    Reset():void;\npair:=struct{Left:int=0;Right:int=0}\n", "expected": "thing := class:\n    var Count:int;\n    Reset():void;\npair := struct{Left:int = 0; Right:int = 0}\n"},
+    {"id": "archetype-colon-single-field", "category": "expression", "input": "Make():point=\n    point:\n        X:=1\nOther():point=\n    point:\n        X:=1;\n        Y:=2\n", "expected": "Make():point =\n    point:\n        X := 1\nOther():point =\n    point:\n        X := 1;\n        Y := 2\n"},
+    {"id": "reject-split-type-annotation", "category": "coverage", "input": "thing := class:\n    Value:\n        X := 1\n", "reject": true},
+    {"id": "reject-hidden-missing-dedent", "category": "coverage", "input": "shade := enum:\n    Light;\n    Dark\n", "reject": true}
   ]
 }

@@ -30,8 +30,8 @@ remaining work) adds it with recorded build results.
 | Unicode in strings/comments | supported; protected, diagnostic scalar columns supported | Unicode position and stdin tests | `unicode-literal` |
 | Braced and dot control bodies | supported; parsed, no style conversion between them | `tests/coverage-gaps.rs` golden/idempotence cases for both shapes | `control-bodies`, `dot-control-body` |
 | Tabs | refused (exit 2); structural indentation tabs refused, protected text preserved | Indentation refusal tests; no guessed tab width | `tab-indentation` |
-| Indentation up to 252 scanner levels | supported (exit 0); the deepest indentation whose scanner state still serializes | Scanner boundary probe | `shallow-indentation` |
-| Indentation at 253 scanner levels or deeper | refused (exit 2); 253 levels are the first refused depth, because the scanner's 253-entry stack must fit Tree-sitter's 1024-byte state buffer | Scanner boundary probe | `deep-indentation` |
+| Indentation up to 251 scanner levels | supported (exit 0); the deepest indentation whose scanner state still serializes without recovery | Scanner boundary probe | `shallow-indentation` |
+| Indentation at 252 scanner levels or deeper | refused (exit 2); 252 levels are the first refused depth, because the scanner's 253-entry stack must fit Tree-sitter's 1024-byte state buffer and the innermost body would need one more entry | Scanner boundary probe | `deep-indentation` |
 | `<#>` indented comments | refused (exit 2); upstream misclassification | Guard regression | `indented-hash-comment` |
 | Markup expressions | refused (exit 2); base grammar rejects the construct | Guard/CLI regression | `markup` |
 | Quoted or non-ASCII identifiers | refused (exit 2); lexer/grammar coverage limit | Lexer/grammar coverage limit | `quoted-identifier`, `non-ascii-identifier` |
@@ -72,6 +72,10 @@ remaining work) adds it with recorded build results.
 | `for (...) do Expr` and a dot body holding `set` | supported | `for-do-and-dot-set` corpus case | `for-do-and-dot-set` |
 | Parameter typed by a function signature, e.g. `Callback(:int):void` | supported | `function-typed-parameter` corpus case | `function-typed-parameter` |
 | `<# ... #>` block comments after code, at file scope, trailing a statement or inside a block | supported; protected byte-for-byte | `block-comments-mid-file` corpus case; scanner regression tests | `block-comments-mid-file` |
+| `;` after a type-body member, e.g. `var Count:int;`, `struct{Left:int = 0; Right:int = 0}` | supported | `type-body-semicolons` corpus case | `type-body-semicolons` |
+| Indented archetype with one field, e.g. `point:` then `X := 1`, and `;` between fields | supported; read as a construction, never as a typed definition across lines | `archetype-colon-single-field` corpus case; CST test | `archetype-colon-single-field` |
+| Type annotation continued on the next line, e.g. `Value:` then an indented `X := 1` in a class body | refused (exit 2); `name:` with an indented block is a block, so a tree joining the lines into one typed definition is not trusted | `reject-split-type-annotation` corpus case; guard test | `split-type-annotation` |
+| Parser recovery that inserts a hidden MISSING indentation token, e.g. `;` between indented enum variants | refused (exit 2); the CST walk cannot see hidden tokens, so the tree's error flag is checked as well | `reject-hidden-missing-dedent` corpus case; parser test | `hidden-missing-dedent` |
 | Two statements joined across a multi-line block comment, e.g. `A := 1 <# a` / `#> B := 2` | refused (exit 2); the comment does not separate them, at file scope or inside a block | `reject-comment-joined-statements` and `reject-comment-joined-top-level` corpus cases | `comment-joined-statements` |
 | Statement line starting with unary `+`/`-` after another expression, e.g. `X := A` then `-2 < A` | refused (exit 2); newlines are not separators, so the grammar joins it as a binary operand | `reject-leading-unary-continuation` corpus case; guard regression in both tools | `reject-leading-unary-continuation` |
 | Guard refusal that also contains a raw parse ERROR | refused (exit 2); guard stays primary, the parse error is a secondary failure with its offset and node kind | `tests/diagnostics-stage.rs`, self-authored fixtures | `guard-with-parse-error` |
@@ -101,7 +105,7 @@ regions are reduced to one. Explicit EOL conversion is refused if it would
 change bytes inside a multiline string/comment.
 
 `tests/fixtures/corpus.json` maps the named inputs to independent golden output or
-explicit refusal. Corpus counts: 141 cases total, 115 golden and 26 refusal.
+explicit refusal. Corpus counts: 145 cases total, 117 golden and 28 refusal.
 That split is asserted by `tests/docs-drift.rs`, so no document can quote a
 count the fixture file contradicts. Categories include normal/boundary/rejection
 forms, rather than merely counting whitespace permutations. Calls/index brackets

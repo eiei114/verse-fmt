@@ -101,6 +101,11 @@ indentation fails closed. This is a parser-safety bound, not a Verse language li
    between them, so a block comment that spans lines does not separate
    `A := 1 <# a` from `#> B := 2`. An attribute may share the line of the
    declaration it prefixes, and nothing else may follow an attribute there.
+   A declaration whose type starts on a later line than its `:` is refused:
+   `point:` followed by an indented block is a construction, never a typed
+   definition spanning lines. The CST walk cannot see hidden tokens, so a
+   MISSING `_indent`/`_dedent` inserted during recovery is caught through the
+   tree's own error flag after the walk.
 5. Reparse output and compare the full CST shape and all non-trivia lexical
    tokens, including exact literal/comment bytes. Tree comparison detects
    changing a method's containing block even with identical code tokens.
@@ -170,7 +175,7 @@ license are in `vendor/tree-sitter-verse/upstream.md`. Local probe logs under
 
 `tests/fixtures/corpus.json` contains self-authored named cases, with
 malformed input and known unsupported forms clearly categorized.
-Corpus counts: 141 cases total, 115 golden and 26 refusal.
+Corpus counts: 145 cases total, 117 golden and 28 refusal.
 The corpus test invokes the real CLI and rechecks every successful output for
 idempotence, and `tests/docs-drift.rs` fails when any document quotes a different
 count. This is tool coverage, not UEFN acceptance.
