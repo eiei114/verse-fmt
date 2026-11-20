@@ -11,6 +11,7 @@ typedef enum {
   DEDENT,        // 1
   CASE_INDENT,   // 2
   BLOCK_COMMENT, // 3
+  CALL_OPEN,     // 4
 } TokenType;
 
 /* ─────────────────────────────────────────────────────────────────
@@ -228,6 +229,19 @@ static bool scan(Scanner *s, TSLexer *lexer, const bool *valid_symbols) {
   while (lexer->lookahead == ' ' || lexer->lookahead == '\t' ||
          lexer->lookahead == '\r') {
     skip(lexer);
+  }
+
+  /* ── CALL_OPEN: a '(' on the same line as the callee ────────────
+     Verse ends an expression at a newline before '(', so only an opener
+     reached without crossing a newline continues a call or a declaration's
+     parameter list. The skipped spaces stay outside the token. A carriage
+     return was skipped above, so a lone CR never counts as a line break
+     here; the lexer stage refuses bare CR before parsing. */
+  if (valid_symbols[CALL_OPEN] && lexer->lookahead == '(') {
+    advance(lexer);
+    lexer->mark_end(lexer);
+    lexer->result_symbol = CALL_OPEN;
+    return true;
   }
 
   /* ── Track bracket depth so we suppress INDENT/DEDENT inside

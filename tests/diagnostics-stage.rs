@@ -9,9 +9,6 @@
 //! content or identifier appears here.
 use std::{fs, path::Path, process::Command};
 
-const INLINE_BODY: &str = include_str!("fixtures/diagnostics/inline-binary-body.verse");
-const INLINE_BODY_WITH_PARSE_ERROR: &str =
-    include_str!("fixtures/diagnostics/inline-binary-body-with-parse-error.verse");
 const ADJACENT: &str = include_str!("fixtures/diagnostics/unseparated-adjacent-statements.verse");
 const ADJACENT_WITH_PARSE_ERROR: &str =
     include_str!("fixtures/diagnostics/unseparated-adjacent-with-parse-error.verse");
@@ -50,11 +47,7 @@ fn every_refusal_reports_its_stage_in_text_and_json() {
         ("lexer.verse", "<# unterminated\n", "lexer"),
         ("delimiter.verse", "A := (1\n", "lexer"),
         ("parse.verse", "Banner:=<p>Text</p>\n", "parser"),
-        (
-            "guard.verse",
-            "Add(Left:int,Right:int):int = Left+Right\n",
-            "parser",
-        ),
+        ("guard.verse", "First := 1 Second := 2\n", "parser"),
         ("structure.verse", "A()\n  B()\n", "structure"),
         ("source.verse", "A:=1\0\n", "source"),
     ];
@@ -85,9 +78,9 @@ fn every_refusal_reports_its_stage_in_text_and_json() {
 fn a_guard_refusal_also_reports_the_underlying_parse_error() {
     let temp = tempfile::tempdir().unwrap();
     let root = temp.path();
-    put(root, "case.verse", INLINE_BODY_WITH_PARSE_ERROR);
-    let error_offset = INLINE_BODY_WITH_PARSE_ERROR.find("<p>").unwrap();
-    let guard_offset = INLINE_BODY_WITH_PARSE_ERROR.find("+Right").unwrap();
+    put(root, "case.verse", ADJACENT_WITH_PARSE_ERROR);
+    let error_offset = ADJACENT_WITH_PARSE_ERROR.find("<p>").unwrap();
+    let guard_offset = ADJACENT_WITH_PARSE_ERROR.find("Second").unwrap();
 
     let out = run(root, &["--check", "--output-format", "json", "case.verse"]);
     assert_eq!(out.status.code(), Some(2), "{out:?}");
@@ -150,7 +143,13 @@ fn a_guard_refusal_also_reports_the_underlying_parse_error() {
 fn a_guard_only_refusal_reports_no_secondary_entry() {
     let temp = tempfile::tempdir().unwrap();
     let root = temp.path();
-    for (file, text) in [("inline.verse", INLINE_BODY), ("adjacent.verse", ADJACENT)] {
+    for (file, text) in [
+        ("adjacent.verse", ADJACENT),
+        (
+            "inline-pair.verse",
+            "Run():void = Print(\"a\") Print(\"b\")\n",
+        ),
+    ] {
         put(root, file, text);
         let out = run(root, &["--check", "--output-format", "json", file]);
         assert_eq!(out.status.code(), Some(2), "{file}: {out:?}");
@@ -183,15 +182,14 @@ fn a_parse_error_without_the_guard_is_a_parse_refusal() {
     assert!(reason.get("underlying").is_none(), "{report}");
 }
 
-/// The guard refuses exactly what it refused before. No source becomes accepted
-/// because this slice improved the reporting.
+/// A guarded source stays refused in every mode. Inline binary function
+/// bodies left the guard's set once the grammar gave the body the whole
+/// expression; the corpus pins their formatted shape.
 #[test]
 fn no_source_becomes_accepted_through_the_diagnostics_change() {
     let temp = tempfile::tempdir().unwrap();
     let root = temp.path();
     for (file, text) in [
-        ("inline.verse", INLINE_BODY),
-        ("inline-parse.verse", INLINE_BODY_WITH_PARSE_ERROR),
         ("adjacent.verse", ADJACENT),
         ("adjacent-parse.verse", ADJACENT_WITH_PARSE_ERROR),
     ] {
@@ -215,7 +213,7 @@ fn no_source_becomes_accepted_through_the_diagnostics_change() {
 fn explain_prints_the_executed_stages_and_the_full_chain() {
     let temp = tempfile::tempdir().unwrap();
     let root = temp.path();
-    put(root, "case.verse", INLINE_BODY_WITH_PARSE_ERROR);
+    put(root, "case.verse", ADJACENT_WITH_PARSE_ERROR);
 
     let out = run(root, &["--check", "case.verse"]);
     let plain = stderr(&out);

@@ -91,9 +91,11 @@ indentation fails closed. This is a parser-safety bound, not a Verse language li
    - `nesting = 256`, the lexical nesting bound shared with the CLI document
 4. Reject every ERROR or MISSING CST node. Unknown constructs fail with exit 2;
    they are not silently copied and reported as supported.
-   Also reject unseparated same-line top-level nodes. Corpus investigation found
-   the pinned grammar can parse a top-level inline function's `X+Y` as body X
-   followed by a separate unary +Y, without any ERROR. Do not trust that tree.
+   Also reject unseparated same-line top-level nodes. Newlines are not
+   separators in the pinned grammar, so `A := 1 B := 2` parses as two siblings
+   without any ERROR. Do not trust that tree. An inline function body owns the
+   whole expression on its line, and a call opener must share the callee's
+   line, so `Add(X:int,Y:int):int = X+Y` is one definition.
 5. Reparse output and compare the full CST shape and all non-trivia lexical
    tokens, including exact literal/comment bytes. Tree comparison detects
    changing a method's containing block even with identical code tokens.
@@ -148,9 +150,9 @@ question. `stage` stays `parser` for both outcomes; the `class` field
 (`guard` / `parse`) is what separates them, in text as `[class=…]` and in the
 JSON report as `reason.class` plus `reason.underlying`.
 
-`tests/diagnostics-stage.rs` covers this with self-authored fixtures: an inline
-top-level binary function body, unseparated adjacent top-level statements, and
-both shapes combined with markup the base grammar refuses as a raw ERROR.
+`tests/diagnostics-stage.rs` covers this with self-authored fixtures:
+unseparated adjacent top-level statements, alone and combined with markup the
+base grammar refuses as a raw ERROR.
 
 ## Reproducible checks
 
@@ -163,7 +165,7 @@ license are in `vendor/tree-sitter-verse/upstream.md`. Local probe logs under
 
 `tests/fixtures/corpus.json` contains self-authored named cases, with
 malformed input and known unsupported forms clearly categorized.
-Corpus counts: 114 cases total, 89 golden and 25 refusal.
+Corpus counts: 128 cases total, 104 golden and 24 refusal.
 The corpus test invokes the real CLI and rechecks every successful output for
 idempotence, and `tests/docs-drift.rs` fails when any document quotes a different
 count. This is tool coverage, not UEFN acceptance.

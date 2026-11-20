@@ -9,7 +9,7 @@
   then locally hardened to bound its serialized indentation stack.
 - Base parser.c SHA-256: `48d6a8af6ecbb12260f0d563d6c7d81c8ce37e33984ebd7e56ab23ad58c56b2e`
 - Base scanner.c SHA-256: `19cde62cd35695010453006f19601393a82747231ddfecd81a6a5eff70e59712`
-- Local scanner.c SHA-256: `470901f9b9408fa552d7cbd14538d45362ef2fb492908643cbb1fdc465288006`
+- Local scanner.c SHA-256: `dc89faa123d4710b31eefd2827cd426fdbad4390f15b3971f665b8ba89c7f19d`
 
 Generated C is vendored so builds need neither Node.js nor network access to
 the upstream grammar. Cargo dependencies still need a cache or registry access.
@@ -117,3 +117,22 @@ space indentation and a bare wildcard arrow at this boundary. The
 scanner keeps the case frame open while closing any preceding arm body.
 The source check verifies the boundary using the line with the colon,
 including when the header spans multiple lines.
+
+A qualified name `(scope:)name` is an expression, so `(super:)Show()`,
+`(local:)Size` and `(/Example.org/Geometry:)point{}` parse as a call, a
+reference and a construction. A qualified generic type keeps the qualified name
+as its `generic_type` name instead of nesting the type under the qualifier.
+
+The scanner emits the external `_call_open` token for a `(` reached without
+crossing a newline. Calls, declaration parameter lists, generic type arguments
+and for-header iterable calls use it, so a `(` on the next line starts a new
+item, as in the official grammar, while `Sum (1, 2)` stays a call. With that
+boundary in place an inline function body no longer needs a precedence that
+ends it before operators: it owns the whole expression on its line
+(`Add(X:int,Y:int):int = X+Y`, `= point{...}`, `= external {}`).
+
+`;` separates statements at file scope and in blocks, the items of an
+`if (...)` condition and a `for (...)` header, and a parenthesized sequence
+`(A; B)`. A typed constant, a field and a function or extension body may use
+`:=` as well as `=`. A named argument may omit `?`. `defer` takes a colon,
+brace or dot block like the other control expressions.

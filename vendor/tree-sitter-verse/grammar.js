@@ -26,6 +26,7 @@ module.exports = grammar({
     $._dedent,       // decrease in indentation
     $._case_indent,  // first arm of an indented case
     $.block_comment, // <# nested block comments #>
+    $._call_open,    // '(' on the callee's line (see scanner.c)
   ],
 
   // Newlines and horizontal whitespace are insignificant everywhere.
@@ -62,6 +63,9 @@ module.exports = grammar({
     [$._type, $.function_type, $.constrained_type],
     [$.type_definition, $.field_initializer],
     [$.map_literal, $._expression],
+    // A same-line '(' after a for-block iterable can open its call either as
+    // the dedicated iterator call or as an ordinary call expression.
+    [$._callable_expression, $._for_block_iterable_call],
   ],
 
   rules: {
@@ -69,7 +73,7 @@ module.exports = grammar({
     // ─────────────────────────────────────────────
     // Source file
     // ─────────────────────────────────────────────
-    source_file: $ => repeat($._top_level_item),
+    source_file: $ => repeat(seq($._top_level_item, optional(';'))),
 
     _top_level_item: $ => choice(
       $.attribute,
@@ -160,7 +164,7 @@ module.exports = grammar({
       optional(field('specifiers', $.specifier_list)),
       ':',
       field('type', $._type),
-      '=',
+      choice('=', ':='),
       field('value', $._expression),
     ),
 
@@ -182,13 +186,13 @@ module.exports = grammar({
     function_definition: $ => seq(
       field('name', choice($.identifier, $.module_scoped_identifier, $.operator_function_name, $.prefix_function_name)),
       optional(field('specifiers', $.specifier_list)),
-      '(',
+      alias($._call_open, '('),
       optional(field('parameters', $.parameter_list)),
       ')',
       optional(field('effect_specifiers', alias($._effect_specifier_list, $.specifier_list))),
       ':',
       field('return_type', $._type),
-      optional(seq('=', field('body', $._function_body))),
+      optional(seq(choice('=', ':='), field('body', $._function_body))),
     ),
 
     // Extension function: (Receiver:Type).MethodName<specs>(params)<specs>:ReturnType
@@ -199,23 +203,26 @@ module.exports = grammar({
       '.',
       field('name', choice($.identifier, $.module_scoped_identifier)),
       optional(field('specifiers', $.specifier_list)),
-      '(',
+      alias($._call_open, '('),
       optional(field('parameters', $.parameter_list)),
       ')',
       optional(field('effect_specifiers', alias($._effect_specifier_list, $.specifier_list))),
       ':',
       field('return_type', $._type),
-      optional(seq('=', field('body', $._function_body))),
+      optional(seq(choice('=', ':='), field('body', $._function_body))),
     ),
 
     // Function body: indented block, brace block, or inline expression
     // prec.left(PREC.CALL + 1) ensures REDUCE wins over SHIFT of '(' from next line
     // (prevents 'external {}(nextLine...)' being parsed as a call expression)
-    _function_body: $ => prec.left(12, choice(
-      $.brace_block,
-      $.indented_block,    // INDENT stmts DEDENT (after '=')
-      $._expression,       // inline expression on same line
-    )),
+    _function_body: $ => choice(
+      prec.left(12, $.brace_block),
+      prec.left(12, $.indented_block),    // INDENT stmts DEDENT (after '=')
+      // An inline body takes the whole expression, operators included. A call
+      // opener on the next line cannot extend it, because `_call_open` only
+      // matches on the callee's own line.
+      prec.left(0, $._expression),
+    ),
 
     // ─────────────────────────────────────────────
     // Type definitions (via :=)
@@ -226,7 +233,7 @@ module.exports = grammar({
       field('name', choice($.identifier, $.module_scoped_identifier)),
       optional(field('specifiers', $.specifier_list)),
       optional(seq(
-        '(',
+        alias($._call_open, '('),
         optional(field('type_params', $.parameter_list)),
         ')',
         optional(field('effect_specifiers', alias($._effect_specifier_list, $.specifier_list))),
@@ -324,7 +331,7 @@ module.exports = grammar({
       optional(field('specifiers', $.specifier_list)),
       ':',
       field('type', $._type),
-      optional(seq('=', field('default', $._expression))),
+      optional(seq(choice('=', ':='), field('default', $._expression))),
     ),
 
     enum_variant:$ => seq(
@@ -448,8 +455,8 @@ module.exports = grammar({
     // e.g. listenable(agent), generator(entity), castable_subtype(T), event()
     // token.immediate prevents greedy matching across newlines (e.g. origin\n(next_line...))
     generic_type: $ => prec(1, seq(
-      field('name', $.identifier),
-      token.immediate('('),
+      field('name', choice($.identifier, $.module_scoped_identifier)),
+      alias($._call_open, '('),
       optional(seq(
         field('argument', $._type),
         repeat(seq(',', field('argument', $._type))),
@@ -465,7 +472,7 @@ module.exports = grammar({
       field('scope', choice($.path_literal, $.identifier)),
       ':',
       ')',
-      choice($.identifier, $.generic_type, $.operator_function_name, $.prefix_function_name),
+      choice($.identifier, $.operator_function_name, $.prefix_function_name),
     ),
 
     // Operator function name: operator'symbol'
@@ -537,7 +544,7 @@ module.exports = grammar({
     // Brace block: { stmts... }
     brace_block: $ => seq(
       '{',
-      repeat($._block_item),
+      repeat(seq($._block_item, optional(';'))),
       '}',
     ),
 
@@ -545,7 +552,7 @@ module.exports = grammar({
     colon_block: $ => seq(
       ':',
       $._indent,
-      repeat($._block_item),
+      repeat(seq($._block_item, optional(';'))),
       $._dedent,
     ),
 
@@ -555,7 +562,7 @@ module.exports = grammar({
     // Indented block after '=': INDENT stmts DEDENT  (for function bodies)
     indented_block: $ => seq(
       $._indent,
-      repeat($._block_item),
+      repeat(seq($._block_item, optional(';'))),
       $._dedent,
     ),
 
@@ -656,6 +663,7 @@ module.exports = grammar({
     _expression: $ => choice(
       $._literal,
       $.identifier,
+      $.module_scoped_identifier,
       $.self_expression,
       $.wildcard,
       $.parenthesized_expression,
@@ -684,6 +692,7 @@ module.exports = grammar({
       $.race_expression,
       $.branch_expression,
       $.spawn_expression,
+      $.defer_expression,
       $.when_expression,
       $.break_expression,
       $.return_expression,
@@ -694,7 +703,12 @@ module.exports = grammar({
 
     wildcard: $ => '_',
 
-    parenthesized_expression: $ => seq('(', $._expression, ')'),
+    parenthesized_expression: $ => seq(
+      '(',
+      $._expression,
+      repeat(seq(';', $._expression)),
+      ')',
+    ),
 
     tuple_expression: $ => seq(
       '(',
@@ -751,7 +765,7 @@ module.exports = grammar({
 
     call_expression: $ => prec.left(PREC.CALL, seq(
       field('function', $._callable_expression),
-      '(',
+      alias($._call_open, '('),
       optional(field('arguments', $.argument_list)),
       ')',
     )),
@@ -836,7 +850,7 @@ module.exports = grammar({
     ),
 
     named_argument: $ => seq(
-      '?',
+      optional('?'),
       field('name', $.identifier),
       ':=',
       field('value', $._expression),
@@ -963,7 +977,7 @@ module.exports = grammar({
 
     if_condition: $ => seq(
       $._if_condition_item,
-      repeat(seq(',', $._if_condition_item)),
+      repeat(seq(choice(',', ';'), $._if_condition_item)),
     ),
 
     // Indented `if:` condition block: one item per line (commas also allowed).
@@ -1007,14 +1021,14 @@ module.exports = grammar({
 
     _for_block_iterable_call: $ => seq(
       field('function', $.identifier),
-      token.immediate('('),
+      alias($._call_open, '('),
       optional(field('arguments', $.argument_list)),
       ')',
     ),
 
     for_clause_list: $ => seq(
       $._for_clause,
-      repeat(seq(',', choice($._for_clause, $.for_filter_binding))),
+      repeat(seq(choice(',', ';'), choice($._for_clause, $.for_filter_binding))),
     ),
 
     _for_clause: $ => choice(
@@ -1090,6 +1104,9 @@ module.exports = grammar({
       ),
     ),
 
+    // defer: INDENT stmts DEDENT, or defer { stmts }
+    defer_expression: $ => seq('defer', field('body', $._control_block)),
+
     when_expression: $ => seq(
       'when',
       '(',
@@ -1118,6 +1135,7 @@ module.exports = grammar({
     // ─────────────────────────────────────────────
 
     identifier: $ => /[a-zA-Z_][a-zA-Z0-9_]*/,
+
   },
 });
 

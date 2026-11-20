@@ -306,12 +306,12 @@ fn refusals_map_to_the_stage_that_actually_decided() {
 fn the_envelope_validates_when_a_guard_refusal_carries_an_underlying_parse_error() {
     let temp = tempfile::tempdir().unwrap();
     let root = temp.path();
-    // Self-authored: an inline top-level binary function body (what the guard
+    // Self-authored: two unseparated statements on one line (what the guard
     // refuses) plus markup the base grammar rejects (the raw ERROR underneath).
     put(
         root,
         "guard.verse",
-        "Add(Left:int,Right:int):int = Left+Right\nBanner:=<p>Plain text</p>\n",
+        "First := 1 Second := 2\nBanner:=<p>Plain text</p>\n",
     );
     let out = run(root, &[".", "--check", "--output-format", "json"]);
     assert_eq!(out.status.code(), Some(2), "{out:?}");
