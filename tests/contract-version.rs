@@ -92,6 +92,11 @@ fn a_contract_version_divergence_between_the_repositories_fails() {
     let pair = pair();
     let formatter = asserted_version(include_str!("../docs/cli.md")).unwrap();
     let Ok(path) = std::env::var("VERSE_LINT_DOC") else {
+        assert_eq!(
+            formatter, pair.linter_contract_version,
+            "{} asserts contract version {formatter}, but tests/fixtures/contract-pair.json              records {} asserting {}; set VERSE_LINT_DOC to re-read the sibling document",
+            pair.formatter_doc, pair.linter_repository, pair.linter_contract_version
+        );
         return;
     };
     let linter_doc = fs::read_to_string(&path)

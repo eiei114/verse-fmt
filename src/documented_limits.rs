@@ -23,7 +23,7 @@ pub const MAX_SOURCE_BYTES: usize = 8 * 1024 * 1024;
 pub const MAX_TOTAL_BYTES: usize = 64 * 1024 * 1024;
 /// Deepest accepted lexical/bracket nesting level.
 pub const MAX_NESTING: usize = 256;
-/// Largest accepted `.verse.toml` or ignore file.
+/// Largest accepted `verse.toml` or ignore file.
 pub const CONFIG_BYTES: usize = 256 * 1024;
 /// Most sources one invocation analyzes.
 pub const MAX_SOURCE_FILES: usize = 10_000;
