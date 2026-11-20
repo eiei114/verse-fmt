@@ -61,8 +61,8 @@ greppable:
 
 ```text
 verse-fmt: device.verse:1:2: unterminated block comment [stage=lexer]
-verse-fmt: device.verse:1:35: ambiguous adjacent top-level statements; inline binary function bodies are unsupported by the pinned grammar [stage=parser] [class=guard]
-device.verse:2:9: underlying parse error: ERROR node at byte 49; unsupported or incomplete Verse syntax [stage=parser] [class=parse]
+verse-fmt: device.verse:1:12: ambiguous adjacent top-level statements; the pinned grammar split one line into several statements without a `;` [stage=parser] [class=guard]
+device.verse:2:9: underlying parse error: ERROR node at byte 31; unsupported or incomplete Verse syntax [stage=parser] [class=parse]
 ```
 
 The `verse-fmt:` prefix belongs to the primary diagnostic only. It is added
@@ -85,12 +85,12 @@ the stage order the source actually entered and the complete failure chain,
 after the ordinary concise diagnostic:
 
 ```text
-verse-fmt: device.verse:1:35: ambiguous adjacent top-level statements; ... [stage=parser] [class=guard]
-device.verse:2:9: underlying parse error: ERROR node at byte 49; ... [stage=parser] [class=parse]
+verse-fmt: device.verse:1:12: ambiguous adjacent top-level statements; ... [stage=parser] [class=guard]
+device.verse:2:9: underlying parse error: ERROR node at byte 31; ... [stage=parser] [class=parse]
 verse-fmt explain: device.verse
   stages: source -> lexer -> parser
-  failure 1 (primary, parser/guard, offset 34): 1:35: ambiguous adjacent top-level statements; ...
-  failure 2 (secondary, parser/parse, ERROR, offset 49): underlying parse error: ERROR node at byte 49; ...
+  failure 1 (primary, parser/guard, offset 11): 1:12: ambiguous adjacent top-level statements; ...
+  failure 2 (secondary, parser/parse, ERROR, offset 31): underlying parse error: ERROR node at byte 31; ...
 ```
 
 `stages` lists every stage the source entered, in execution order, and always

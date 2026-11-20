@@ -56,6 +56,9 @@ pub struct Document {
     shape: Vec<(u16, bool)>,
 }
 
+/// The prefix stays stable so existing greps on it keep matching.
+const ADJACENT_STATEMENTS_MESSAGE: &str = "ambiguous adjacent top-level statements; the pinned grammar split one line into several statements without a `;`";
+
 const EMPTY_ARCHETYPE_BRACE_MESSAGE: &str =
     "an empty indented archetype may have absorbed a braced expression on the next line";
 
@@ -308,9 +311,10 @@ impl Document {
                     "parse budget exceeded; source was not changed",
                 )
             })?;
-        // The pinned grammar can split an inline function's X+Y into a body X
-        // plus a sibling unary +Y without ERROR. Refuse unseparated top-level
-        // statements on one physical line instead of trusting that recovery.
+        // Newlines are not separators in the pinned grammar, so a line holding
+        // two statements without `;` (e.g. `A := 1 B := 2`) can parse as two
+        // siblings without ERROR. Refuse unseparated top-level statements on
+        // one physical line instead of trusting that split.
         //
         // The refusal is recorded rather than returned, so the walk below can
         // report what else is wrong with the same tree without changing this
@@ -332,10 +336,7 @@ impl Document {
                         .take_while(|t| t.range.start < start)
                         .any(|t| t.kind == lex::Kind::Code && t.text(source) == ";");
                     if !separated {
-                        guard = Some(Failure::guarded(
-                            start,
-                            "ambiguous adjacent top-level statements; inline binary function bodies are unsupported by the pinned grammar",
-                        ));
+                        guard = Some(Failure::guarded(start, ADJACENT_STATEMENTS_MESSAGE));
                         break;
                     }
                 }
@@ -450,7 +451,9 @@ impl Document {
                 let mut children = node.walk();
                 for child in node.children(&mut children) {
                     if matches!(child.kind(), "(" | "[") {
-                        call_openers.insert(child.start_byte() + source.body_start());
+                        // A call opener may carry the horizontal space before
+                        // it (`F (X)`); record the bracket byte itself.
+                        call_openers.insert(child.end_byte() - 1 + source.body_start());
                     }
                 }
             }
@@ -576,13 +579,21 @@ mod tests {
         (source, document)
     }
 
+    fn raw_tree(text: &str) -> tree_sitter::Tree {
+        let mut parser = Parser::new();
+        // SAFETY: same statically linked grammar as production.
+        let language = Language::new(unsafe { LanguageFn::from_raw(tree_sitter_verse) });
+        parser.set_language(&language).unwrap();
+        parser.parse(text, None).unwrap()
+    }
+
     #[test]
     fn the_guard_stays_primary_and_the_raw_parse_error_is_secondary() {
-        // A self-authored shape: an inline top-level binary function body (the
+        // A self-authored shape: two unseparated statements on one line (the
         // guard's own reason) plus markup the base grammar refuses, so the same
         // tree carries a raw ERROR. Before this slice only the guard message
         // was reported and the parse error surfaced only after a fix.
-        let text = "Add(X:int,Y:int):int = X+Y\nText:=<p>Hello</p>\n";
+        let text = "A := 1 B := 2\nText:=<p>Hello</p>\n";
         let source = Source::from_bytes(text.as_bytes()).unwrap();
         let failure = Document::parse(&source).unwrap_err();
         assert_eq!(failure.stage, Stage::Parser);
@@ -594,7 +605,7 @@ mod tests {
             "{}",
             failure.message
         );
-        assert_eq!(failure.offset, text.find("+Y").unwrap());
+        assert_eq!(failure.offset, text.find("B :=").unwrap());
         assert_eq!(failure.underlying.len(), 1, "{failure:?}");
         let underlying = &failure.underlying[0];
         assert_eq!(underlying.stage, Stage::Parser);
@@ -636,15 +647,86 @@ mod tests {
         // The guard alone refuses this: the tree has no ERROR or MISSING node,
         // so no secondary entry may be fabricated to look like one.
         for text in [
-            "Add(X:int,Y:int):int = X+Y\n",
             "A := 1 B := 2\n",
             "Print(\"a\") Print(\"b\")\n",
+            "Run():void = Print(\"a\") Print(\"b\")\n",
         ] {
             let source = Source::from_bytes(text.as_bytes()).unwrap();
             let failure = Document::parse(&source).unwrap_err();
             assert_eq!(failure.class, Some(Class::Guard), "{text}");
             assert!(failure.underlying.is_empty(), "{text}: {failure:?}");
         }
+    }
+
+    #[test]
+    fn an_inline_function_body_takes_the_whole_expression() {
+        // Self-authored shapes. The body owns every operator and postfix on
+        // its line; a parenthesis on the next line starts a new item.
+        for (text, body_kind) in [
+            ("Add(X:int,Y:int):int = X+Y\n", "binary_expression"),
+            ("Scale(X:int):int = X*2+1\n", "binary_expression"),
+            ("Make():point = point{X := 1}\n", "object_construction"),
+            ("Run():void = Log (1)\n", "call_expression"),
+            ("Compute(X:int):int = external {}\n", "object_construction"),
+        ] {
+            let (_, _) = parsed(text);
+            let tree = raw_tree(text);
+            let root = tree.root_node();
+            assert!(!root.has_error(), "{text}");
+            assert_eq!(root.named_child_count(), 1, "{text}");
+            let body = root
+                .named_child(0)
+                .unwrap()
+                .child_by_field_name("body")
+                .unwrap();
+            assert_eq!(body.kind(), body_kind, "{text}");
+            assert_eq!(body.end_byte(), text.len() - 1, "{text}");
+        }
+        let text = "Same(A:int):int = A\n(V:int).Twice():int = V*2\n";
+        let tree = raw_tree(text);
+        let root = tree.root_node();
+        assert!(!root.has_error());
+        let mut cursor = root.walk();
+        assert_eq!(
+            root.named_children(&mut cursor)
+                .map(|child| child.kind())
+                .collect::<Vec<_>>(),
+            ["function_definition", "extension_function_definition"]
+        );
+    }
+
+    #[test]
+    fn a_call_opener_must_share_the_callee_line() {
+        // `F (X)` on one line is a call; `(X)` on the next line is a new
+        // statement, so the next line can never become an argument list.
+        let joined = raw_tree("F():void =\n    Log (1)\n");
+        let body = joined
+            .root_node()
+            .named_child(0)
+            .unwrap()
+            .child_by_field_name("body")
+            .unwrap();
+        assert_eq!(body.named_child(0).unwrap().kind(), "call_expression");
+        let split = raw_tree("F():void =\n    Ready := Check\n    (Ready)\n");
+        let body = split
+            .root_node()
+            .named_child(0)
+            .unwrap()
+            .child_by_field_name("body")
+            .unwrap();
+        assert!(!split.root_node().has_error());
+        assert_eq!(body.named_child_count(), 2);
+        assert_eq!(
+            body.named_child(1).unwrap().kind(),
+            "parenthesized_expression"
+        );
+        // The opener of a spaced call is still the bracket byte itself.
+        let (source, document) = parsed("X := Sum (1, 2)\n");
+        assert!(
+            document
+                .call_openers
+                .contains(&source.text().find('(').unwrap())
+        );
     }
 
     #[test]
@@ -686,25 +768,34 @@ mod tests {
     }
 
     #[test]
-    fn the_guard_refuses_exactly_the_sources_it_refused_before() {
-        // Pre-slice refusal set: every one of these failed the guard with no
-        // raw parse error. None may become accepted, and none may gain a
-        // fabricated secondary entry.
+    fn the_guard_refuses_unseparated_statements_and_accepts_separated_ones() {
+        // Unseparated statements on one line still fail the guard with no raw
+        // parse error. Inline binary bodies left this set once the body took
+        // the whole expression; `an_inline_function_body_takes_the_whole_expression`
+        // pins their new shape.
         for text in [
-            "Add(X:int,Y:int):int = X+Y\n",
-            "F(X:int):int = X*2\nG(Y:int):int = Y-1\n",
             "A := 1 B := 2\n",
+            "Run():void = Print(\"a\") Print(\"b\")\n",
         ] {
             let source = Source::from_bytes(text.as_bytes()).unwrap();
             let failure = Document::parse(&source).unwrap_err();
             assert_eq!(failure.class, Some(Class::Guard), "{text}");
         }
-        // A semicolon-separated pair is not what the guard is about: the base
-        // grammar itself refuses it as a raw parse error, which is exactly why
-        // the guard cannot be judged from the guard message alone.
-        let separated = Source::from_bytes(b"A := 1; B := 2\n").unwrap();
-        let failure = Document::parse(&separated).unwrap_err();
-        assert_eq!(failure.class, Some(Class::Parse));
+        for text in [
+            "Add(X:int,Y:int):int = X+Y\n",
+            "F(X:int):int = X*2\nG(Y:int):int = Y-1\n",
+        ] {
+            let source = Source::from_bytes(text.as_bytes()).unwrap();
+            assert!(Document::parse(&source).is_ok(), "{text}");
+        }
+        // A `;` separates statements, at file scope and in blocks.
+        for text in [
+            "A := 1; B := 2\n",
+            "F():void =\n    Log(\"a\"); Log(\"b\")\n",
+        ] {
+            let source = Source::from_bytes(text.as_bytes()).unwrap();
+            assert!(Document::parse(&source).is_ok(), "{text}");
+        }
     }
 
     #[test]
@@ -1006,7 +1097,31 @@ mod tests {
 
     #[test]
     fn indented_for_refuses_ambiguous_clause_boundaries() {
-        for joined in ["(0)", "[0]", "{Value := 0}"] {
+        // A parenthesis on the next line cannot join the previous clause: it
+        // is its own filter clause, as in the official grammar.
+        let text =
+            "F():void =\n    for:\n        Item : Items\n        (0)\n    do:\n        Use(Item)\n";
+        let tree = raw_tree(text);
+        assert!(!tree.root_node().has_error());
+        let clauses = tree
+            .root_node()
+            .named_child(0)
+            .unwrap()
+            .child_by_field_name("body")
+            .unwrap()
+            .named_child(0)
+            .unwrap()
+            .child_by_field_name("clauses")
+            .unwrap();
+        let mut cursor = clauses.walk();
+        assert_eq!(
+            clauses
+                .named_children(&mut cursor)
+                .map(|child| child.kind())
+                .collect::<Vec<_>>(),
+            ["for_iterator", "parenthesized_expression"]
+        );
+        for joined in ["[0]", "{Value := 0}"] {
             let text = format!(
                 "F():void =\n    for:\n        Item : Items\n        {joined}\n    do:\n        Use(Item)\n"
             );
@@ -1759,7 +1874,7 @@ mod tests {
             "using { }\n",
             "shade := enum{Light,,Dark}\n",
             "shade := enum{,Light}\n",
-            "Add(X:int,Y:int):int = X+Y\n",
+            "A := 1 B := 2\n",
             "A := map{\"x\" => }\n",
         ] {
             let source = Source::from_bytes(text.as_bytes()).unwrap();

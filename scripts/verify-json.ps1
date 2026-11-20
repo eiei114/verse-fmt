@@ -89,12 +89,12 @@ try {
     if ($check.Stderr.Contains([char]27)) { throw 'stderr contains an ANSI escape for a redirected stream' }
 
     # ---- a guard refusal also reports the underlying parse error ----------
-    # Self-authored: an inline top-level binary function body (what the guard
+    # Self-authored: two unseparated statements on one line (what the guard
     # refuses) plus markup the base grammar rejects (the raw ERROR underneath).
     # The guard stays primary; the parse error is secondary, at its own offset.
     $guardProject = Join-Path $workspace 'guard failure'
     New-Item -ItemType Directory $guardProject | Out-Null
-    Set-Content -LiteralPath (Join-Path $guardProject 'guard.verse') -Value "Add(Left:int,Right:int):int = Left+Right`nBanner:=<p>Plain text</p>" -NoNewline
+    Set-Content -LiteralPath (Join-Path $guardProject 'guard.verse') -Value "First := 1 Second := 2`nBanner:=<p>Plain text</p>" -NoNewline
     $guard = Invoke-VerseFmt @('guard.verse', '--check', '--output-format', 'json') $guardProject
     Assert-Equal $guard.ExitCode 2 'guard refusal'
     $report = Assert-Envelope $guard 'guard refusal'
@@ -128,7 +128,7 @@ try {
     }
 
     # A guard refusal with no raw parse error reports no secondary entry.
-    Set-Content -LiteralPath (Join-Path $guardProject 'guard-only.verse') -Value 'Add(Left:int,Right:int):int = Left+Right' -NoNewline
+    Set-Content -LiteralPath (Join-Path $guardProject 'guard-only.verse') -Value 'First := 1 Second := 2' -NoNewline
     $guardOnly = Invoke-VerseFmt @('guard-only.verse', '--check', '--output-format', 'json') $guardProject
     Assert-Equal $guardOnly.ExitCode 2 'guard-only refusal'
     $report = Assert-Envelope $guardOnly 'guard-only refusal'

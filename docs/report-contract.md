@@ -50,15 +50,15 @@ its previous wording. See [CLI](cli.md#stage-markers-and---explain).
       "reason": {
         "stage": "parser",
         "class": "guard",
-        "message": "1:35: ambiguous adjacent top-level statements; inline binary function bodies are unsupported by the pinned grammar",
-        "offset": 34,
+        "message": "1:12: ambiguous adjacent top-level statements; the pinned grammar split one line into several statements without a `;`",
+        "offset": 11,
         "underlying": [
           {
             "stage": "parser",
             "class": "parse",
-            "offset": 49,
+            "offset": 31,
             "nodeKind": "ERROR",
-            "message": "underlying parse error: ERROR node at byte 49; unsupported or incomplete Verse syntax"
+            "message": "underlying parse error: ERROR node at byte 31; unsupported or incomplete Verse syntax"
           }
         ]
       }

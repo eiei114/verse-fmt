@@ -36,6 +36,10 @@
         "named": true
       },
       {
+        "type": "defer_expression",
+        "named": true
+      },
+      {
         "type": "failable_call_expression",
         "named": true
       },
@@ -73,6 +77,10 @@
       },
       {
         "type": "member_access",
+        "named": true
+      },
+      {
+        "type": "module_scoped_identifier",
         "named": true
       },
       {
@@ -849,6 +857,30 @@
     }
   },
   {
+    "type": "defer_expression",
+    "named": true,
+    "fields": {
+      "body": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "brace_block",
+            "named": true
+          },
+          {
+            "type": "colon_block",
+            "named": true
+          },
+          {
+            "type": "dot_block",
+            "named": true
+          }
+        ]
+      }
+    }
+  },
+  {
     "type": "dot_block",
     "named": true,
     "fields": {},
@@ -1495,6 +1527,10 @@
           {
             "type": "identifier",
             "named": true
+          },
+          {
+            "type": "module_scoped_identifier",
+            "named": true
           }
         ]
       }
@@ -2022,10 +2058,6 @@
       "required": true,
       "types": [
         {
-          "type": "generic_type",
-          "named": true
-        },
-        {
           "type": "identifier",
           "named": true
         },
@@ -2218,7 +2250,7 @@
     "named": true,
     "fields": {},
     "children": {
-      "multiple": false,
+      "multiple": true,
       "required": true,
       "types": [
         {
@@ -3211,6 +3243,10 @@
   },
   {
     "type": "decides",
+    "named": false
+  },
+  {
+    "type": "defer",
     "named": false
   },
   {

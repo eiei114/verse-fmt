@@ -11,7 +11,7 @@ UEFN compile and runtime acceptance have not yet been performed. Parser and
 formatter test success must not be presented as UEFN acceptance.
 
 `tests/fixtures/corpus.json` adds named, categorized self-authored cases:
-Corpus counts: 114 cases total, 89 golden and 25 refusal.
+Corpus counts: 128 cases total, 104 golden and 24 refusal.
 A golden case carries an independent expected output; a refusal case is an
 explicit exit 2, so the total is never a count of successes.
 Categories cover encodings,
@@ -25,7 +25,8 @@ constants, comma-separated braced enums, empty class base lists, if-binding
 conditions, failable indexed `set` conditions, key/value iterators, and tested
 indented object/array construction with anonymous field initializers now use a
 documented local grammar delta with independent positive regressions. Map literals
-and the top-level binary-function ambiguity remain conservatively rejected.
+and top-level inline binary function bodies have since joined that delta;
+unseparated statements on one line remain conservatively rejected.
 
 `src/robustness.rs` uses fixed xorshift seeds (recorded in code), 256 structured
 layout/property cases, 1,024 arbitrary-byte cases, deep/token-dense refusals and

@@ -53,7 +53,15 @@ remaining work) adds it with recorded build results.
 | Key/value iterator `for (Key -> Value : Values)` | supported in tested form | Self-authored iterator-field and golden regression | `key-value-iterator` |
 | Indented object/array construction and anonymous field initializer `{Z := 5}` | supported in tested shape | Self-authored nested-construction regression | `indented-construction` |
 | Map literal `map{"x" => 1}` | supported | Expanded corpus and parser probe | `map-literal` |
-| Top-level inline binary function body `Add(X:int,Y:int):int = X+Y` | refused (exit 2); same-line sibling ambiguity, grammar otherwise mis-splits body | Expanded corpus; explicit guard in both tools | `inline-binary-body` |
+| Top-level inline function body with operators or an archetype, e.g. `Add(X:int,Y:int):int = X+Y` | supported; the body owns the whole expression on its line | `inline-binary-body` and `inline-archetype-body` corpus cases; CST tests | `inline-binary-body` |
+| Unseparated statements on one line, e.g. `First := 1 Second := 2` | refused (exit 2); newlines are not separators, so the grammar splits the line without ERROR | `reject-unseparated-statements` corpus case; guard in both tools | `unseparated-statements` |
+| Call opener on the callee's line, including `Sum (1, 2)` | supported; spacing before a confirmed opener is removed, and a `(` on the next line starts a new statement | `spaced-call-opener` and `next-line-paren-statement` corpus cases; CST tests | `spaced-call-opener`, `next-line-paren-statement` |
+| Qualified names in expressions, e.g. `(super:)Show()`, `(local:)Size`, `(/Example.org/Geometry:)point{}` | supported | `qualified-super-call`, `path-qualified-expression` and `qualified-definition-name` corpus cases | `qualified-super-call`, `path-qualified-expression` |
+| `external {}` function body | supported | `external-function-body` corpus case | `external-function-body` |
+| `;` between statements and inside `if (...)`, `for (...)` and a parenthesized sequence | supported; one space after `;`, none before | `semicolon-separators` and `semicolon-top-level` corpus cases | `semicolon-separators` |
+| Typed definition with `:=`, e.g. `Limit:int := 10`, `Double(X:int):int :=` | supported | `typed-colon-equals` corpus case | `typed-colon-equals` |
+| `defer:` and `defer{...}` blocks | supported | `defer-block` corpus case | `defer-block` |
+| Named argument without `?`, e.g. `Make(Width := 1)` | supported | `named-argument` corpus case | `named-argument` |
 | Statement line starting with unary `+`/`-` after another expression, e.g. `X := A` then `-2 < A` | refused (exit 2); newlines are not separators, so the grammar joins it as a binary operand | `reject-leading-unary-continuation` corpus case; guard regression in both tools | `reject-leading-unary-continuation` |
 | Guard refusal that also contains a raw parse ERROR | refused (exit 2); guard stays primary, the parse error is a secondary failure with its offset and node kind | `tests/diagnostics-stage.rs`, self-authored fixtures | `guard-with-parse-error` |
 | String beginning with unescaped `#`, e.g. `A := "# text"` | refused (exit 2); pinned scanner may misclassify | Linter rule investigation; never alter the literal to make it parse | `hash-prefixed-string` |
@@ -82,7 +90,7 @@ regions are reduced to one. Explicit EOL conversion is refused if it would
 change bytes inside a multiline string/comment.
 
 `tests/fixtures/corpus.json` maps the named inputs to independent golden output or
-explicit refusal. Corpus counts: 114 cases total, 89 golden and 25 refusal.
+explicit refusal. Corpus counts: 128 cases total, 104 golden and 24 refusal.
 That split is asserted by `tests/docs-drift.rs`, so no document can quote a
 count the fixture file contradicts. Categories include normal/boundary/rejection
 forms, rather than merely counting whitespace permutations. Calls/index brackets
