@@ -56,6 +56,106 @@ pub struct Document {
     shape: Vec<(u16, bool)>,
 }
 
+/// `@name Def` on one line: an attribute prefixes the definition after it,
+/// so the two siblings are not an ambiguous split. Only a declaration (or a
+/// further attribute) may follow; a braced literal or any other expression
+/// after an attribute still fails the guard, so a misparsed `@name{...}` can
+/// never pass as two harmless siblings.
+fn prefix_attribute(left: tree_sitter::Node<'_>, right: tree_sitter::Node<'_>) -> bool {
+    left.kind() == "attribute"
+        && matches!(
+            right.kind(),
+            "attribute"
+                | "type_definition"
+                | "function_definition"
+                | "extension_function_definition"
+                | "var_declaration"
+                | "constant_declaration"
+                | "field_declaration"
+        )
+}
+
+/// True when nothing but spaces and comments lies between the last
+/// significant token that ends by `left_end` and `right_start`: the two items
+/// share one logical line. A block comment that spans lines is not a line
+/// break (`A := 1 <# a\n #> B := 2` is one line of two statements), so only a
+/// newline outside comments, or one of `separators`, separates them.
+fn shares_logical_line(
+    tokens: &[lex::Token],
+    source: &Source,
+    left_end: usize,
+    right_start: usize,
+    separators: &[&str],
+) -> bool {
+    let last = tokens[..tokens.partition_point(|t| t.range.end <= left_end)]
+        .iter()
+        .rev()
+        .find(|t| t.kind.is_significant())
+        .map_or(0, |t| t.range.end);
+    !tokens[tokens.partition_point(|t| t.range.start < last)..]
+        .iter()
+        .take_while(|t| t.range.start < right_start)
+        .any(|t| {
+            t.kind == lex::Kind::Newline
+                || (t.kind == lex::Kind::Code && separators.contains(&t.text(source)))
+        })
+}
+
+/// Containers whose items must each start on their own logical line (or be
+/// separated by `;`, or `,` where the container allows it).
+fn item_separators(kind: &str) -> Option<&'static [&'static str]> {
+    match kind {
+        "indented_block" | "colon_block" | "brace_block" => Some(&[";"]),
+        "class_definition"
+        | "struct_definition"
+        | "interface_definition"
+        | "module_definition"
+        | "field_initializer_block" => Some(&[";"]),
+        // Condition items may also use `,`, and an item's own `:=` binds its
+        // name to its value.
+        "if_block_condition" => Some(&[";", ",", ":="]),
+        _ => None,
+    }
+}
+
+/// The first item of `node` that shares a logical line with the item before
+/// it. Header fields of a type definition (its specifiers and bases) are not
+/// items, and a prefix attribute may share the line of the item it prefixes.
+fn unseparated_item(
+    node: tree_sitter::Node<'_>,
+    tokens: &[lex::Token],
+    source: &Source,
+) -> Option<usize> {
+    let separators = item_separators(node.kind())?;
+    let mut cursor = node.walk();
+    let mut previous: Option<tree_sitter::Node<'_>> = None;
+    if !cursor.goto_first_child() {
+        return None;
+    }
+    loop {
+        let child = cursor.node();
+        let header = matches!(cursor.field_name(), Some("specifiers" | "base"));
+        if child.is_named() && !child.is_extra() && !header {
+            if let Some(left) = previous {
+                let end = left.end_byte() + source.body_start();
+                let start = child.start_byte() + source.body_start();
+                if shares_logical_line(tokens, source, end, start, separators)
+                    && !prefix_attribute(left, child)
+                {
+                    return Some(start);
+                }
+            }
+            previous = Some(child);
+        }
+        if !cursor.goto_next_sibling() {
+            return None;
+        }
+    }
+}
+
+const UNSEPARATED_ITEMS_MESSAGE: &str =
+    "ambiguous adjacent statements on one logical line; separate them with a newline or `;`";
+
 /// The prefix stays stable so existing greps on it keep matching.
 const ADJACENT_STATEMENTS_MESSAGE: &str = "ambiguous adjacent top-level statements; the pinned grammar split one line into several statements without a `;`";
 
@@ -329,16 +429,11 @@ impl Document {
             if let Some(left) = previous {
                 let end = left.end_byte() + source.body_start();
                 let start = node.start_byte() + source.body_start();
-                if source.position(end.saturating_sub(1)).0 == source.position(start).0 {
-                    let first = tokens.partition_point(|t| t.range.end <= end);
-                    let separated = tokens[first..]
-                        .iter()
-                        .take_while(|t| t.range.start < start)
-                        .any(|t| t.kind == lex::Kind::Code && t.text(source) == ";");
-                    if !separated {
-                        guard = Some(Failure::guarded(start, ADJACENT_STATEMENTS_MESSAGE));
-                        break;
-                    }
+                if shares_logical_line(&tokens, source, end, start, &[";"])
+                    && !prefix_attribute(left, node)
+                {
+                    guard = Some(Failure::guarded(start, ADJACENT_STATEMENTS_MESSAGE));
+                    break;
                 }
             }
             previous = Some(node);
@@ -427,6 +522,11 @@ impl Document {
                         ));
                     }
                 }
+            }
+            if guard.is_none()
+                && let Some(start) = unseparated_item(node, &tokens, source)
+            {
+                guard = Some(Failure::guarded(start, UNSEPARATED_ITEMS_MESSAGE));
             }
             if guard.is_none()
                 && let Some(start) = empty_archetype_brace_continuation(node, source)
@@ -693,6 +793,108 @@ mod tests {
                 .collect::<Vec<_>>(),
             ["function_definition", "extension_function_definition"]
         );
+    }
+
+    #[test]
+    fn items_joined_across_a_block_comment_share_a_logical_line() {
+        // A comment that spans the line break is not a separator, at file
+        // scope, in a block, or in an indented condition.
+        for (text, joined) in [
+            ("A := 1 <# a\n#> B := 2\n", "B := 2"),
+            ("F():void =\n    A := 1 <# a\n    #> B := 2\n", "B := 2"),
+            (
+                "F():void =\n    if:\n        A := X[] <# a\n        #> B := Y[]\n    then:\n        G()\n",
+                "B := Y",
+            ),
+            (
+                "thing := class:\n    A:int = 1 <# a\n    #> B:int = 2\n",
+                "B:int",
+            ),
+        ] {
+            let source = Source::from_bytes(text.as_bytes()).unwrap();
+            let failure = Document::parse(&source).unwrap_err();
+            assert_eq!(failure.class, Some(Class::Guard), "{text}");
+            assert_eq!(failure.offset, text.find(joined).unwrap(), "{text}");
+        }
+        // A newline outside the comment, `;`, or a condition's `,` separates.
+        for text in [
+            "A := 1 <# a #>\nB := 2\n",
+            "F():void =\n    A := 1 <# a\n    #>\n    B := 2\n",
+            "F():void =\n    A := 1; B := 2\n",
+            "F():void =\n    if:\n        A := X[], B := Y[]\n    then:\n        G()\n",
+        ] {
+            let source = Source::from_bytes(text.as_bytes()).unwrap();
+            assert!(Document::parse(&source).is_ok(), "{text}");
+        }
+    }
+
+    #[test]
+    fn an_attribute_may_prefix_only_a_declaration_on_its_line() {
+        for text in [
+            "@marker marker := class(attribute):\n    Value:string\n",
+            "@first @second Run():void = {}\n",
+            "@since{Version := 3} Run():void = {}\n",
+            "thing := class:\n    @editable Count:int = 0\n",
+        ] {
+            let source = Source::from_bytes(text.as_bytes()).unwrap();
+            assert!(Document::parse(&source).is_ok(), "{text}");
+        }
+        for text in ["@marker Log(\"x\")\n", "@marker 1 + 2\n"] {
+            let source = Source::from_bytes(text.as_bytes()).unwrap();
+            let failure = Document::parse(&source).unwrap_err();
+            assert_eq!(failure.class, Some(Class::Guard), "{text}");
+        }
+        // Braces after an attribute name stay its argument list, even after a
+        // dedent and a comment, instead of becoming a separate braced literal.
+        let tree = raw_tree(
+            "greeter := interface:\n    Greet():void\n# note\n@since{Version := 3}\nRun():void\n",
+        );
+        let root = tree.root_node();
+        assert!(!root.has_error());
+        let mut cursor = root.walk();
+        assert_eq!(
+            root.named_children(&mut cursor)
+                .filter(|child| !child.is_extra())
+                .map(|child| child.kind())
+                .collect::<Vec<_>>(),
+            ["type_definition", "attribute", "function_definition"]
+        );
+    }
+
+    #[test]
+    fn block_comments_after_code_are_comment_nodes() {
+        for text in [
+            "X := 1\n<# c #>\nY := 2\n",
+            "X := 1 <# c #>\nY := 2\n",
+            "using { /Example.org/Thing }\n<#\nmulti\n#>\nY := 2\n",
+            "F():void =\n    X := 1\n    <# c #>\n    Y := 2\n",
+            "F():void =\n    X := 1\n    <#\n    c\n    #>\n    Y := 2\n",
+        ] {
+            let (_, _) = parsed(text);
+            let tree = raw_tree(text);
+            let mut comments = Vec::new();
+            let mut cursor = tree.walk();
+            loop {
+                let node = cursor.node();
+                if node.kind() == "block_comment" {
+                    comments.push(&text[node.byte_range()]);
+                }
+                if cursor.goto_first_child() {
+                    continue;
+                }
+                while !cursor.goto_next_sibling() {
+                    if !cursor.goto_parent() {
+                        break;
+                    }
+                }
+                if cursor.node() == tree.root_node() {
+                    break;
+                }
+            }
+            let start = text.find("<#").unwrap();
+            let end = text.find("#>").unwrap() + 2;
+            assert_eq!(comments, [&text[start..end]], "{text}");
+        }
     }
 
     #[test]

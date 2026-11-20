@@ -62,6 +62,17 @@ remaining work) adds it with recorded build results.
 | Typed definition with `:=`, e.g. `Limit:int := 10`, `Double(X:int):int :=` | supported | `typed-colon-equals` corpus case | `typed-colon-equals` |
 | `defer:` and `defer{...}` blocks | supported | `defer-block` corpus case | `defer-block` |
 | Named argument without `?`, e.g. `Make(Width := 1)` | supported | `named-argument` corpus case | `named-argument` |
+| Attribute prefixing a definition on its own line, e.g. `@marker_scope marker := class(attribute):` | supported; only a declaration or another attribute may follow an attribute on one line | `prefix-attribute-same-line` corpus case; guard tests | `prefix-attribute-same-line` |
+| Attribute before an enum variant, e.g. `@doc("first")` then `First` | supported | `enum-variant-attributes` corpus case | `enum-variant-attributes` |
+| Attribute with an indented block of field initializers, e.g. `@editable:` then `Hint := true` | supported | `attribute-block-arguments` corpus case | `attribute-block-arguments` |
+| Accessor specifiers, e.g. `var Count<getter(GetCount)><setter(SetCount)>:int` | supported | `accessor-specifiers` corpus case | `accessor-specifiers` |
+| Empty base list on a struct or interface, e.g. `interface():`, `struct():`, `interface(){}` | supported | `empty-base-lists` corpus case | `empty-base-lists` |
+| `block:` clause in a class body | supported | `class-block-clause` corpus case | `class-block-clause` |
+| Indented `if:` condition block without `then` | supported | `if-condition-block-only` corpus case | `if-condition-block-only` |
+| `for (...) do Expr` and a dot body holding `set` | supported | `for-do-and-dot-set` corpus case | `for-do-and-dot-set` |
+| Parameter typed by a function signature, e.g. `Callback(:int):void` | supported | `function-typed-parameter` corpus case | `function-typed-parameter` |
+| `<# ... #>` block comments after code, at file scope, trailing a statement or inside a block | supported; protected byte-for-byte | `block-comments-mid-file` corpus case; scanner regression tests | `block-comments-mid-file` |
+| Two statements joined across a multi-line block comment, e.g. `A := 1 <# a` / `#> B := 2` | refused (exit 2); the comment does not separate them, at file scope or inside a block | `reject-comment-joined-statements` and `reject-comment-joined-top-level` corpus cases | `comment-joined-statements` |
 | Statement line starting with unary `+`/`-` after another expression, e.g. `X := A` then `-2 < A` | refused (exit 2); newlines are not separators, so the grammar joins it as a binary operand | `reject-leading-unary-continuation` corpus case; guard regression in both tools | `reject-leading-unary-continuation` |
 | Guard refusal that also contains a raw parse ERROR | refused (exit 2); guard stays primary, the parse error is a secondary failure with its offset and node kind | `tests/diagnostics-stage.rs`, self-authored fixtures | `guard-with-parse-error` |
 | String beginning with unescaped `#`, e.g. `A := "# text"` | refused (exit 2); pinned scanner may misclassify | Linter rule investigation; never alter the literal to make it parse | `hash-prefixed-string` |
@@ -90,7 +101,7 @@ regions are reduced to one. Explicit EOL conversion is refused if it would
 change bytes inside a multiline string/comment.
 
 `tests/fixtures/corpus.json` maps the named inputs to independent golden output or
-explicit refusal. Corpus counts: 128 cases total, 104 golden and 24 refusal.
+explicit refusal. Corpus counts: 141 cases total, 115 golden and 26 refusal.
 That split is asserted by `tests/docs-drift.rs`, so no document can quote a
 count the fixture file contradicts. Categories include normal/boundary/rejection
 forms, rather than merely counting whitespace permutations. Calls/index brackets
