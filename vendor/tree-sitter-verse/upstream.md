@@ -9,7 +9,7 @@
   then locally hardened to bound its serialized indentation stack.
 - Base parser.c SHA-256: `48d6a8af6ecbb12260f0d563d6c7d81c8ce37e33984ebd7e56ab23ad58c56b2e`
 - Base scanner.c SHA-256: `19cde62cd35695010453006f19601393a82747231ddfecd81a6a5eff70e59712`
-- Local scanner.c SHA-256: `dc89faa123d4710b31eefd2827cd426fdbad4390f15b3971f665b8ba89c7f19d`
+- Local scanner.c SHA-256: `e176d6c7d07f251f3bc286985c6759da85852550f1b1da376ecd88b8faf3f035`
 
 Generated C is vendored so builds need neither Node.js nor network access to
 the upstream grammar. Cargo dependencies still need a cache or registry access.
@@ -136,3 +136,24 @@ ends it before operators: it owns the whole expression on its line
 `(A; B)`. A typed constant, a field and a function or extension body may use
 `:=` as well as `=`. A named argument may omit `?`. `defer` takes a colon,
 brace or dot block like the other control expressions.
+
+An attribute keeps a braced argument list in preference to a braced literal
+that could start the next item, and it may take an indented block of field
+initializers (`@editable:` followed by `Hint := true`). Attributes may prefix an
+enum variant. Specifiers accept an accessor argument (`<getter(GetCount)>`,
+`<setter(SetCount)>`). A struct or interface may have an empty base list, a class
+body may hold a `block:` clause, and an indented `if:` condition block may stand
+without `then`. A parenthesized `for` header may take `do` with an inline
+expression or a block, a dot body may hold `set`, and a parameter may be typed
+by a function signature (`Callback(:int):void`).
+
+The scanner reads a `<#` comment wherever the grammar's lexer would otherwise
+see `<`: after horizontal space, on a later line at file scope, and on the next
+content line of a block when the indentation does not change. Only the comment
+bytes form the token. Before this, a block comment anywhere but at the very
+start of a scan was split into `<`, a line comment and stray tokens.
+
+A type body and an indented field-initializer block accept `;` after an item.
+An indented archetype (`point:` followed by `X := 1`) carries a dynamic
+preference over a typed definition with `:=`, so a single-field archetype is
+not read as `point:X := 1` across the line break.

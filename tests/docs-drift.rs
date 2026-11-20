@@ -1146,8 +1146,8 @@ impl CoverageCase {
 
 fn generated_fixture(name: &str) -> Vec<u8> {
     match name {
+        "indentation-depth-251" => deep_indentation(251).into_bytes(),
         "indentation-depth-252" => deep_indentation(252).into_bytes(),
-        "indentation-depth-253" => deep_indentation(253).into_bytes(),
         other => panic!(
             "tests/fixtures/coverage.json names generated fixture {other:?}, \
              which this test cannot build"

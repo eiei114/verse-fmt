@@ -1,4 +1,9 @@
 //! Original ambiguous comment example, not copied from a private project.
+//!
+//! `A := First[] <# keep` / `comment #> B := Second[]` puts two statements on
+//! one logical line: the block comment spans the line break, so nothing
+//! separates them. The scanner reads the comment at its true boundary, and
+//! the unseparated-item guard refuses the pair before any check or write.
 use std::{fs, process::Command};
 
 const MISMATCH: &str = "F():void =\n    if:\n        A := First[] <# keep\n        comment #> B := Second[]\n    then:\n        Print(\"yes\")\n";
@@ -18,7 +23,10 @@ fn mismatched_block_comment_fails_before_check_or_write() {
             .unwrap();
         assert_eq!(out.status.code(), Some(2), "{mode}: {out:?}");
         assert!(out.stdout.is_empty());
-        assert!(String::from_utf8_lossy(&out.stderr).contains("block comment boundary"));
+        assert!(
+            String::from_utf8_lossy(&out.stderr)
+                .contains("ambiguous adjacent statements on one logical line")
+        );
         assert_eq!(fs::read(&path).unwrap(), source.as_bytes());
     }
 }
@@ -73,7 +81,7 @@ fn earliest_mismatch_position_is_deterministic_with_bom_and_crlf() {
         assert_eq!(out.status.code(), Some(2), "{out:?}");
         assert!(
             String::from_utf8_lossy(&out.stderr)
-                .contains(":3:22: unsupported block comment boundary"),
+                .contains(":4:20: ambiguous adjacent statements on one logical line"),
             "{out:?}"
         );
         if let Some(ref bytes) = previous {
@@ -99,7 +107,10 @@ fn later_mismatch_prevents_earlier_file_write() {
         .output()
         .unwrap();
     assert_eq!(out.status.code(), Some(2), "{out:?}");
-    assert!(String::from_utf8_lossy(&out.stderr).contains("block comment boundary"));
+    assert!(
+        String::from_utf8_lossy(&out.stderr)
+            .contains("ambiguous adjacent statements on one logical line")
+    );
     assert_eq!(fs::read(&first).unwrap(), b"Value:=1  \n");
     assert_eq!(fs::read(&later).unwrap(), MISMATCH.as_bytes());
 }

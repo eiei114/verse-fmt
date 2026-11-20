@@ -112,10 +112,21 @@ module.exports = grammar({
       '@',
       field('name', $.identifier),
       optional(seq(token.immediate('('), field('arg', $._expression), ')')),
-      optional(seq(
-        '{',
-        optional($.field_initializer_list),
-        '}',
+      optional(choice(
+        // `@name{...}` keeps its braces even where a braced literal could
+        // start the next item.
+        prec.dynamic(1, seq(
+          '{',
+          optional($.field_initializer_list),
+          '}',
+        )),
+        // `@name:` followed by an indented block of field initializers.
+        seq(
+          ':',
+          $._indent,
+          optional(field('fields', $.field_initializer_block)),
+          $._dedent,
+        ),
       )),
     ),
 
@@ -271,6 +282,7 @@ module.exports = grammar({
     struct_definition: $ => seq(
       'struct',
       optional(field('specifiers', $.specifier_list)),
+      optional(seq('(', ')')),
       $._type_body,
     ),
 
@@ -285,8 +297,10 @@ module.exports = grammar({
       optional(field('specifiers', $.specifier_list)),
       optional(seq(
         '(',
-        field('base', $._type),
-        repeat(seq(',', field('base', $._type))),
+        optional(seq(
+          field('base', $._type),
+          repeat(seq(',', field('base', $._type))),
+        )),
         ')',
       )),
       $._type_body,
@@ -299,8 +313,8 @@ module.exports = grammar({
 
     // Type body: ':' INDENT members DEDENT  OR  '{ members }'
     _type_body: $ => choice(
-      seq(':', $._indent, repeat($._class_member), $._dedent),
-      seq('{', repeat($._class_member), '}'),
+      seq(':', $._indent, repeat(seq($._class_member, optional(';'))), $._dedent),
+      seq('{', repeat(seq($._class_member, optional(';'))), '}'),
     ),
 
     _enum_body: $ => choice(
@@ -316,6 +330,7 @@ module.exports = grammar({
 
     _class_member: $ => choice(
       $.attribute,
+      $.block_expression,
       $.using_declaration,
       $.var_declaration,
       $.function_definition,
@@ -335,6 +350,7 @@ module.exports = grammar({
     ),
 
     enum_variant:$ => seq(
+      repeat(field('attribute', $.attribute)),
       field('name', choice($.identifier, $.module_scoped_identifier)),
       optional(seq('(', field('type', $._type), ')')),
     ),
@@ -362,6 +378,7 @@ module.exports = grammar({
       'castable', 'concrete', 'unique', 'final_super', 'final_super_base', 'open', 'closed',
       'native_callable', 'module_scoped_var_weak_map_key', 'epic_internal',
       'persistable', 'persistent', 'predicts', 'uht_comparable', 'localizes',
+      'getter', 'setter',
     ),
 
     // ─────────────────────────────────────────────
@@ -386,6 +403,7 @@ module.exports = grammar({
 
     _parameter: $ => choice(
       $.named_parameter,
+      $.function_parameter,
       $.positional_parameter,
       $.anonymous_parameter,
       $.tuple_parameter,
@@ -395,6 +413,17 @@ module.exports = grammar({
       field('name', choice($.identifier, $.module_scoped_identifier)),
       ':',
       field('type', $._type),
+    ),
+
+    // A parameter typed by a function signature: Name(params)<effects>:Return
+    function_parameter: $ => seq(
+      field('name', $.identifier),
+      alias($._call_open, '('),
+      optional(field('parameters', $.parameter_list)),
+      ')',
+      optional(field('effect_specifiers', alias($._effect_specifier_list, $.specifier_list))),
+      ':',
+      field('return_type', $._type),
     ),
 
     // Receiver parameter in extension functions: supports where clause
@@ -557,7 +586,7 @@ module.exports = grammar({
     ),
 
     // Dot block: '.' expr  (single expression, for if/loop inline forms)
-    dot_block: $ => seq('.', $._expression),
+    dot_block: $ => seq('.', choice($._expression, $.set_statement)),
 
     // Indented block after '=': INDENT stmts DEDENT  (for function bodies)
     indented_block: $ => seq(
@@ -798,12 +827,15 @@ module.exports = grammar({
           optional(field('fields', $.field_initializer_list)),
           '}',
         ),
-        seq(
+        // `point:` with an indented block is a construction. A typed
+        // definition `point:X := 1` cannot take this reading's place: its
+        // type annotation never continues on the next line.
+        prec.dynamic(1, seq(
           ':',
           $._indent,
           optional(field('fields', $.field_initializer_block)),
           $._dedent,
-        ),
+        )),
       ),
     )),
 
@@ -814,7 +846,8 @@ module.exports = grammar({
 
     field_initializer_block: $ => seq(
       $.field_initializer,
-      repeat($.field_initializer),
+      repeat(seq(optional(';'), $.field_initializer)),
+      optional(';'),
     ),
 
     braced_expression_list: $ => seq(
@@ -970,9 +1003,11 @@ module.exports = grammar({
       $._indent,
       field('condition', $.if_block_condition),
       $._dedent,
-      'then',
-      field('consequence', $._control_block),
-      optional(seq('else', field('alternative', choice($._control_block, $.else_if_clause)))),
+      optional(seq(
+        'then',
+        field('consequence', $._control_block),
+        optional(seq('else', field('alternative', choice($._control_block, $.else_if_clause)))),
+      )),
     )),
 
     if_condition: $ => seq(
@@ -999,10 +1034,18 @@ module.exports = grammar({
     for_expression: $ => seq(
       'for',
       choice(
-        seq('(', field('clauses', $.for_clause_list), ')'),
-        seq(':', $._indent, field('clauses', $.for_block_clause_list), $._dedent, 'do'),
+        seq(
+          '(', field('clauses', $.for_clause_list), ')',
+          choice(
+            field('body', $._control_block),
+            seq('do', field('body', choice($._control_block, $._expression))),
+          ),
+        ),
+        seq(
+          ':', $._indent, field('clauses', $.for_block_clause_list), $._dedent, 'do',
+          field('body', $._control_block),
+        ),
       ),
-      field('body', $._control_block),
     ),
 
     for_block_clause_list: $ => seq(
@@ -1143,7 +1186,11 @@ function specifier($, opener) {
   return seq(
     opener,
     field('name', alias($._specifier_name, $.specifier_name)),
-    optional(seq('{', field('value', choice($.path_literal, $.identifier)), '}')),
+    optional(choice(
+      seq('{', field('value', choice($.path_literal, $.identifier)), '}'),
+      // An accessor names its function: `<getter(GetCount)>`.
+      seq(token.immediate('('), field('accessor', $.identifier), ')'),
+    )),
     '>',
   );
 }

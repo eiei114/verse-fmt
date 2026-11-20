@@ -56,6 +56,158 @@ pub struct Document {
     shape: Vec<(u16, bool)>,
 }
 
+/// `@name Def` on one line: an attribute prefixes the definition after it,
+/// so the two siblings are not an ambiguous split. Only a declaration (or a
+/// further attribute) may follow; a braced literal or any other expression
+/// after an attribute still fails the guard, so a misparsed `@name{...}` can
+/// never pass as two harmless siblings.
+fn prefix_attribute(left: tree_sitter::Node<'_>, right: tree_sitter::Node<'_>) -> bool {
+    left.kind() == "attribute"
+        && matches!(
+            right.kind(),
+            "attribute"
+                | "type_definition"
+                | "function_definition"
+                | "extension_function_definition"
+                | "var_declaration"
+                | "constant_declaration"
+                | "field_declaration"
+        )
+}
+
+/// True when nothing but spaces and comments lies between the last
+/// significant token that ends by `left_end` and `right_start`: the two items
+/// share one logical line. A block comment that spans lines is not a line
+/// break (`A := 1 <# a\n #> B := 2` is one line of two statements), so only a
+/// newline outside comments, or one of `separators`, separates them.
+fn shares_logical_line(
+    tokens: &[lex::Token],
+    source: &Source,
+    left_end: usize,
+    right_start: usize,
+    separators: &[&str],
+) -> bool {
+    let last = tokens[..tokens.partition_point(|t| t.range.end <= left_end)]
+        .iter()
+        .rev()
+        .find(|t| t.kind.is_significant())
+        .map_or(0, |t| t.range.end);
+    !tokens[tokens.partition_point(|t| t.range.start < last)..]
+        .iter()
+        .take_while(|t| t.range.start < right_start)
+        .any(|t| {
+            t.kind == lex::Kind::Newline
+                || (t.kind == lex::Kind::Code && separators.contains(&t.text(source)))
+        })
+}
+
+/// Containers whose items must each start on their own logical line (or be
+/// separated by `;`, or `,` where the container allows it).
+fn item_separators(kind: &str) -> Option<&'static [&'static str]> {
+    match kind {
+        "indented_block" | "colon_block" | "brace_block" => Some(&[";"]),
+        "class_definition"
+        | "struct_definition"
+        | "interface_definition"
+        | "module_definition"
+        | "field_initializer_block" => Some(&[";"]),
+        // Condition items may also use `,`, and an item's own `:=` binds its
+        // name to its value.
+        "if_block_condition" => Some(&[";", ",", ":="]),
+        _ => None,
+    }
+}
+
+/// The first item of `node` that shares a logical line with the item before
+/// it. Header fields of a type definition (its specifiers and bases) are not
+/// items, and a prefix attribute may share the line of the item it prefixes.
+fn unseparated_item(
+    node: tree_sitter::Node<'_>,
+    tokens: &[lex::Token],
+    source: &Source,
+) -> Option<usize> {
+    let separators = item_separators(node.kind())?;
+    let mut cursor = node.walk();
+    let mut previous: Option<tree_sitter::Node<'_>> = None;
+    if !cursor.goto_first_child() {
+        return None;
+    }
+    loop {
+        let child = cursor.node();
+        let header = matches!(cursor.field_name(), Some("specifiers" | "base"));
+        if child.is_named() && !child.is_extra() && !header {
+            if let Some(left) = previous {
+                let end = left.end_byte() + source.body_start();
+                let start = child.start_byte() + source.body_start();
+                if shares_logical_line(tokens, source, end, start, separators)
+                    && !prefix_attribute(left, child)
+                {
+                    return Some(start);
+                }
+            }
+            previous = Some(child);
+        }
+        if !cursor.goto_next_sibling() {
+            return None;
+        }
+    }
+}
+
+/// Where the tree still carries an error that no visible node shows: descend
+/// through the first child that has one and report the end of the deepest
+/// such node, which is where a hidden MISSING token sits.
+fn hidden_error_offset(root: tree_sitter::Node<'_>) -> Option<usize> {
+    if !root.has_error() {
+        return None;
+    }
+    let mut node = root;
+    loop {
+        let mut cursor = node.walk();
+        let Some(child) = node
+            .children(&mut cursor)
+            .find(|child| child.has_error() || child.is_missing())
+        else {
+            return Some(node.end_byte());
+        };
+        node = child;
+    }
+}
+
+const SPLIT_TYPE_ANNOTATION_MESSAGE: &str = "type annotation continues on the next line; `name:` followed by an indented block is a block, not a type";
+
+/// A declaration whose type starts on a later line than its `:`. Verse reads
+/// `point:` followed by an indented block as a construction, so a tree that
+/// joined the two lines into one typed definition is not trusted.
+fn split_type_annotation(
+    node: tree_sitter::Node<'_>,
+    tokens: &[lex::Token],
+    source: &Source,
+) -> Option<usize> {
+    if !matches!(
+        node.kind(),
+        "constant_declaration" | "field_declaration" | "var_declaration" | "positional_parameter"
+    ) {
+        return None;
+    }
+    let ty = node.child_by_field_name("type")?;
+    let mut cursor = node.walk();
+    let colon = node
+        .children(&mut cursor)
+        .take_while(|child| child.start_byte() < ty.start_byte())
+        .filter(|child| child.kind() == ":")
+        .last()?;
+    let from = colon.end_byte() + source.body_start();
+    let to = ty.start_byte() + source.body_start();
+    tokens[tokens.partition_point(|t| t.range.start < from)..]
+        .iter()
+        .take_while(|t| t.range.start < to)
+        .any(|t| t.kind == lex::Kind::Newline)
+        .then_some(to)
+}
+
+const UNSEPARATED_ITEMS_MESSAGE: &str =
+    "ambiguous adjacent statements on one logical line; separate them with a newline or `;`";
+
 /// The prefix stays stable so existing greps on it keep matching.
 const ADJACENT_STATEMENTS_MESSAGE: &str = "ambiguous adjacent top-level statements; the pinned grammar split one line into several statements without a `;`";
 
@@ -329,16 +481,11 @@ impl Document {
             if let Some(left) = previous {
                 let end = left.end_byte() + source.body_start();
                 let start = node.start_byte() + source.body_start();
-                if source.position(end.saturating_sub(1)).0 == source.position(start).0 {
-                    let first = tokens.partition_point(|t| t.range.end <= end);
-                    let separated = tokens[first..]
-                        .iter()
-                        .take_while(|t| t.range.start < start)
-                        .any(|t| t.kind == lex::Kind::Code && t.text(source) == ";");
-                    if !separated {
-                        guard = Some(Failure::guarded(start, ADJACENT_STATEMENTS_MESSAGE));
-                        break;
-                    }
+                if shares_logical_line(&tokens, source, end, start, &[";"])
+                    && !prefix_attribute(left, node)
+                {
+                    guard = Some(Failure::guarded(start, ADJACENT_STATEMENTS_MESSAGE));
+                    break;
                 }
             }
             previous = Some(node);
@@ -427,6 +574,16 @@ impl Document {
                         ));
                     }
                 }
+            }
+            if guard.is_none()
+                && let Some(start) = unseparated_item(node, &tokens, source)
+            {
+                guard = Some(Failure::guarded(start, UNSEPARATED_ITEMS_MESSAGE));
+            }
+            if guard.is_none()
+                && let Some(start) = split_type_annotation(node, &tokens, source)
+            {
+                guard = Some(Failure::guarded(start, SPLIT_TYPE_ANNOTATION_MESSAGE));
             }
             if guard.is_none()
                 && let Some(start) = empty_archetype_brace_continuation(node, source)
@@ -526,6 +683,26 @@ impl Document {
                     break;
                 }
                 if !cursor.goto_parent() {
+                    // The cursor never visits hidden terminals, so a MISSING
+                    // `_indent`/`_dedent` the parser inserted during recovery
+                    // is invisible to the walk above. The tree still records
+                    // it; refuse it like any other MISSING node.
+                    if let Some(offset) = hidden_error_offset(tree.root_node()) {
+                        let offset = offset + source.body_start();
+                        let message = "unsupported or incomplete Verse syntax; use UEFN for compiler diagnostics";
+                        let Some(primary) = guard.take() else {
+                            return Err(Failure::parse(offset, message));
+                        };
+                        return Err(primary.with_underlying(Underlying {
+                            stage: Stage::Parser,
+                            class: Class::Parse,
+                            offset,
+                            message: format!(
+                                "underlying parse error: MISSING hidden token near byte {offset}; unsupported or incomplete Verse syntax",
+                            ),
+                            node_kind: "MISSING".to_owned(),
+                        }));
+                    }
                     if let Some(primary) = guard.take() {
                         return Err(primary);
                     }
@@ -693,6 +870,154 @@ mod tests {
                 .collect::<Vec<_>>(),
             ["function_definition", "extension_function_definition"]
         );
+    }
+
+    #[test]
+    fn items_joined_across_a_block_comment_share_a_logical_line() {
+        // A comment that spans the line break is not a separator, at file
+        // scope, in a block, or in an indented condition.
+        for (text, joined) in [
+            ("A := 1 <# a\n#> B := 2\n", "B := 2"),
+            ("F():void =\n    A := 1 <# a\n    #> B := 2\n", "B := 2"),
+            (
+                "F():void =\n    if:\n        A := X[] <# a\n        #> B := Y[]\n    then:\n        G()\n",
+                "B := Y",
+            ),
+            (
+                "thing := class:\n    A:int = 1 <# a\n    #> B:int = 2\n",
+                "B:int",
+            ),
+        ] {
+            let source = Source::from_bytes(text.as_bytes()).unwrap();
+            let failure = Document::parse(&source).unwrap_err();
+            assert_eq!(failure.class, Some(Class::Guard), "{text}");
+            assert_eq!(failure.offset, text.find(joined).unwrap(), "{text}");
+        }
+        // A newline outside the comment, `;`, or a condition's `,` separates.
+        for text in [
+            "A := 1 <# a #>\nB := 2\n",
+            "F():void =\n    A := 1 <# a\n    #>\n    B := 2\n",
+            "F():void =\n    A := 1; B := 2\n",
+            "F():void =\n    if:\n        A := X[], B := Y[]\n    then:\n        G()\n",
+        ] {
+            let source = Source::from_bytes(text.as_bytes()).unwrap();
+            assert!(Document::parse(&source).is_ok(), "{text}");
+        }
+    }
+
+    #[test]
+    fn an_attribute_may_prefix_only_a_declaration_on_its_line() {
+        for text in [
+            "@marker marker := class(attribute):\n    Value:string\n",
+            "@first @second Run():void = {}\n",
+            "@since{Version := 3} Run():void = {}\n",
+            "thing := class:\n    @editable Count:int = 0\n",
+        ] {
+            let source = Source::from_bytes(text.as_bytes()).unwrap();
+            assert!(Document::parse(&source).is_ok(), "{text}");
+        }
+        for text in ["@marker Log(\"x\")\n", "@marker 1 + 2\n"] {
+            let source = Source::from_bytes(text.as_bytes()).unwrap();
+            let failure = Document::parse(&source).unwrap_err();
+            assert_eq!(failure.class, Some(Class::Guard), "{text}");
+        }
+        // Braces after an attribute name stay its argument list, even after a
+        // dedent and a comment, instead of becoming a separate braced literal.
+        let tree = raw_tree(
+            "greeter := interface:\n    Greet():void\n# note\n@since{Version := 3}\nRun():void\n",
+        );
+        let root = tree.root_node();
+        assert!(!root.has_error());
+        let mut cursor = root.walk();
+        assert_eq!(
+            root.named_children(&mut cursor)
+                .filter(|child| !child.is_extra())
+                .map(|child| child.kind())
+                .collect::<Vec<_>>(),
+            ["type_definition", "attribute", "function_definition"]
+        );
+    }
+
+    #[test]
+    fn a_single_field_archetype_is_a_construction_not_a_split_typed_definition() {
+        for text in [
+            "Make():point =\n    point:\n        X := 1\n",
+            "Make():point =\n    point:\n        X := 1;\n        Y := 2\n",
+        ] {
+            let (_, _) = parsed(text);
+            let tree = raw_tree(text);
+            let body = tree
+                .root_node()
+                .named_child(0)
+                .unwrap()
+                .child_by_field_name("body")
+                .unwrap();
+            assert_eq!(
+                body.named_child(0).unwrap().kind(),
+                "object_construction",
+                "{text}"
+            );
+        }
+        // A typed definition whose type sits on the next line is refused.
+        let text = "thing := class:\n    Value:\n        X := 1\n";
+        let failure = Document::parse(&Source::from_bytes(text.as_bytes()).unwrap()).unwrap_err();
+        assert_eq!(failure.class, Some(Class::Guard));
+        assert!(
+            failure.message.contains("type annotation continues"),
+            "{failure:?}"
+        );
+        assert_eq!(failure.offset, text.find("X := 1").unwrap());
+    }
+
+    #[test]
+    fn a_hidden_missing_token_is_refused_even_though_the_walk_cannot_see_it() {
+        // The enum body takes no `;`, so recovery closes it with a MISSING
+        // `_dedent` (hidden, so the cursor never visits it) and reads the rest
+        // at file scope without any visible ERROR node. If indented enums ever
+        // accept `;`, replace this input with another hidden-token recovery.
+        let text = "shade := enum:\n    Light;\n    Dark\n";
+        let tree = raw_tree(text);
+        assert!(tree.root_node().has_error());
+        let failure = Document::parse(&Source::from_bytes(text.as_bytes()).unwrap()).unwrap_err();
+        assert_eq!(failure.class, Some(Class::Parse), "{failure:?}");
+        // A struct body that does take `;` keeps its members.
+        let (_, _) = parsed("thing := class:\n  var Count:int;\n  Reset():void;\n");
+    }
+
+    #[test]
+    fn block_comments_after_code_are_comment_nodes() {
+        for text in [
+            "X := 1\n<# c #>\nY := 2\n",
+            "X := 1 <# c #>\nY := 2\n",
+            "using { /Example.org/Thing }\n<#\nmulti\n#>\nY := 2\n",
+            "F():void =\n    X := 1\n    <# c #>\n    Y := 2\n",
+            "F():void =\n    X := 1\n    <#\n    c\n    #>\n    Y := 2\n",
+        ] {
+            let (_, _) = parsed(text);
+            let tree = raw_tree(text);
+            let mut comments = Vec::new();
+            let mut cursor = tree.walk();
+            loop {
+                let node = cursor.node();
+                if node.kind() == "block_comment" {
+                    comments.push(&text[node.byte_range()]);
+                }
+                if cursor.goto_first_child() {
+                    continue;
+                }
+                while !cursor.goto_next_sibling() {
+                    if !cursor.goto_parent() {
+                        break;
+                    }
+                }
+                if cursor.node() == tree.root_node() {
+                    break;
+                }
+            }
+            let start = text.find("<#").unwrap();
+            let end = text.find("#>").unwrap() + 2;
+            assert_eq!(comments, [&text[start..end]], "{text}");
+        }
     }
 
     #[test]

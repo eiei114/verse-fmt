@@ -60,34 +60,41 @@ static inline void skip(TSLexer *lexer) { lexer->advance(lexer, true); }
 /* ─────────────────────────────────────────────────────────────────
  * Block comment scanner: <# ... #> with arbitrary nesting.
  * ───────────────────────────────────────────────────────────────── */
-static bool scan_block_comment(TSLexer *lexer) {
-  /* Caller has confirmed we are at '<#'. */
+/* A comment that starts at the lookahead. `<#>` runs to the end of the line
+   (the UEFN digest form); any other `<#` opens a nested `<# ... #>` block
+   that ends at its matching `#>` (or at EOF, so the lexer stage reports the
+   unterminated comment). Whitespace skipped before the call stays outside
+   the token. Returns false when the lookahead is not `<#`; the caller must
+   then return false too, so Tree-sitter restores the lexer position. */
+static bool scan_comment_here(TSLexer *lexer) {
+  if (lexer->lookahead != '<') return false;
+  lexer->mark_end(lexer);
   advance(lexer); /* '<' */
+  if (lexer->lookahead != '#') return false;
   advance(lexer); /* '#' */
-
+  if (lexer->lookahead == '>') {
+    advance(lexer); /* '>' */
+    while (lexer->lookahead != '\n' && lexer->lookahead != '\r' &&
+           lexer->lookahead != 0) {
+      advance(lexer);
+    }
+    lexer->mark_end(lexer);
+    lexer->result_symbol = BLOCK_COMMENT;
+    return true;
+  }
   int depth = 1;
   while (lexer->lookahead != 0) {
     if (lexer->lookahead == '<') {
       advance(lexer);
-      if (lexer->lookahead == '#') {
-        advance(lexer);
-        depth++;
-      }
+      if (lexer->lookahead == '#') { advance(lexer); depth++; }
     } else if (lexer->lookahead == '#') {
       advance(lexer);
-      if (lexer->lookahead == '>') {
-        advance(lexer);
-        depth--;
-        if (depth == 0) {
-          lexer->result_symbol = BLOCK_COMMENT;
-          return true;
-        }
-      }
+      if (lexer->lookahead == '>') { advance(lexer); depth--; if (depth == 0) break; }
     } else {
       advance(lexer);
     }
   }
-  /* Unterminated — still return true so the lexer can recover. */
+  lexer->mark_end(lexer); /* token ends at closing #> or EOF */
   lexer->result_symbol = BLOCK_COMMENT;
   return true;
 }
@@ -184,45 +191,10 @@ static bool scan(Scanner *s, TSLexer *lexer, const bool *valid_symbols) {
   /* ── BLOCK_COMMENT: try '<#' at any point ─────────────────────  */
   /* (tree-sitter extras mechanism will skip whitespace before here,
      but we need to detect '<#' before '<' is consumed by grammar.)  */
-  if (valid_symbols[BLOCK_COMMENT]) {
-    if (lexer->lookahead == '<') {
-      lexer->mark_end(lexer);
-      advance(lexer);
-      if (lexer->lookahead == '#') {
-        advance(lexer); /* '#' */
-        /* Special case: <#> (immediately followed by '>') is the UEFN
-           single-line comment form. Scan to EOL only, not to '#>'. */
-        if (lexer->lookahead == '>') {
-          advance(lexer); /* '>' */
-          while (lexer->lookahead != '\n' && lexer->lookahead != '\r' &&
-                 lexer->lookahead != 0) {
-            advance(lexer);
-          }
-          lexer->mark_end(lexer);
-          lexer->result_symbol = BLOCK_COMMENT;
-          return true;
-        }
-        /* Normal nested block comment: scan until matching '#>' or EOF. */
-        int depth = 1;
-        while (lexer->lookahead != 0) {
-          if (lexer->lookahead == '<') {
-            advance(lexer);
-            if (lexer->lookahead == '#') { advance(lexer); depth++; }
-          } else if (lexer->lookahead == '#') {
-            advance(lexer);
-            if (lexer->lookahead == '>') { advance(lexer); depth--; if (depth == 0) break; }
-          } else {
-            advance(lexer);
-          }
-        }
-        lexer->mark_end(lexer); /* token ends at closing #> or EOF (overrides initial mark) */
-        lexer->result_symbol = BLOCK_COMMENT;
-        return true;
-      }
-      /* Not a block comment — don't consume. But we already advanced
-         past '<'. Return false so the grammar can try other rules. */
-      return false;
-    }
+  if (valid_symbols[BLOCK_COMMENT] && lexer->lookahead == '<') {
+    /* Not a comment: the '<' was consumed, so return false and let the
+       grammar lex it. */
+    return scan_comment_here(lexer);
   }
 
   /* ── Skip horizontal whitespace (not newlines). ──────────────── */
@@ -280,12 +252,25 @@ static bool scan(Scanner *s, TSLexer *lexer, const bool *valid_symbols) {
 
   /* ── INDENT / DEDENT: only after a newline ────────────────────  */
   if (lexer->lookahead != '\n' && lexer->lookahead != '\r') {
-    /* Not at a newline — only INDENT/DEDENT are requested here,
-       and neither is possible. */
+    /* Not at a newline, so neither INDENT nor DEDENT is possible. A comment
+       after horizontal space (`X := 1 <# note #>`) is still this scanner's
+       token: the grammar's own lexer cannot produce it. */
+    if (valid_symbols[BLOCK_COMMENT] && lexer->lookahead == '<') {
+      return scan_comment_here(lexer);
+    }
     return false;
   }
 
   if (!can_indent && !valid_symbols[DEDENT]) {
+    /* No indentation decision is pending (file scope), so a comment on a
+       later line can be scanned directly; the skipped lines stay outside it. */
+    if (valid_symbols[BLOCK_COMMENT]) {
+      while (lexer->lookahead == '\n' || lexer->lookahead == '\r' ||
+             lexer->lookahead == ' ' || lexer->lookahead == '\t') {
+        skip(lexer);
+      }
+      if (lexer->lookahead == '<') return scan_comment_here(lexer);
+    }
     return false;
   }
 
@@ -392,6 +377,12 @@ static bool scan(Scanner *s, TSLexer *lexer, const bool *valid_symbols) {
     }
   }
 
+  /* No indentation change: the next content line stays in this block. When
+     it starts with a comment, scan it here, after the skipped newline and
+     indentation, instead of leaving `<#` to the grammar's lexer. */
+  if (valid_symbols[BLOCK_COMMENT] && lexer->lookahead == '<') {
+    return scan_comment_here(lexer);
+  }
   return false;
 }
 

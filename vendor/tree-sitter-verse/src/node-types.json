@@ -320,6 +320,16 @@
           }
         ]
       },
+      "fields": {
+        "multiple": false,
+        "required": false,
+        "types": [
+          {
+            "type": "field_initializer_block",
+            "named": true
+          }
+        ]
+      },
       "name": {
         "multiple": false,
         "required": true,
@@ -701,6 +711,10 @@
           "named": true
         },
         {
+          "type": "block_expression",
+          "named": true
+        },
+        {
           "type": "extension_function_definition",
           "named": true
         },
@@ -891,6 +905,10 @@
         {
           "type": "_expression",
           "named": true
+        },
+        {
+          "type": "set_statement",
+          "named": true
         }
       ]
     }
@@ -991,6 +1009,16 @@
     "type": "enum_variant",
     "named": true,
     "fields": {
+      "attribute": {
+        "multiple": true,
+        "required": false,
+        "types": [
+          {
+            "type": "attribute",
+            "named": true
+          }
+        ]
+      },
       "name": {
         "multiple": false,
         "required": true,
@@ -1296,6 +1324,10 @@
         "required": true,
         "types": [
           {
+            "type": "_expression",
+            "named": true
+          },
+          {
             "type": "brace_block",
             "named": true
           },
@@ -1484,6 +1516,52 @@
     }
   },
   {
+    "type": "function_parameter",
+    "named": true,
+    "fields": {
+      "effect_specifiers": {
+        "multiple": false,
+        "required": false,
+        "types": [
+          {
+            "type": "specifier_list",
+            "named": true
+          }
+        ]
+      },
+      "name": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "identifier",
+            "named": true
+          }
+        ]
+      },
+      "parameters": {
+        "multiple": false,
+        "required": false,
+        "types": [
+          {
+            "type": "parameter_list",
+            "named": true
+          }
+        ]
+      },
+      "return_type": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "_type",
+            "named": true
+          }
+        ]
+      }
+    }
+  },
+  {
     "type": "function_type",
     "named": true,
     "fields": {},
@@ -1662,7 +1740,7 @@
       },
       "consequence": {
         "multiple": true,
-        "required": true,
+        "required": false,
         "types": [
           {
             "type": "_expression",
@@ -1795,6 +1873,10 @@
       "types": [
         {
           "type": "attribute",
+          "named": true
+        },
+        {
+          "type": "block_expression",
           "named": true
         },
         {
@@ -1996,6 +2078,10 @@
       "types": [
         {
           "type": "attribute",
+          "named": true
+        },
+        {
+          "type": "block_expression",
           "named": true
         },
         {
@@ -2224,6 +2310,10 @@
       "types": [
         {
           "type": "anonymous_parameter",
+          "named": true
+        },
+        {
+          "type": "function_parameter",
           "named": true
         },
         {
@@ -2547,6 +2637,16 @@
     "type": "specifier",
     "named": true,
     "fields": {
+      "accessor": {
+        "multiple": false,
+        "required": false,
+        "types": [
+          {
+            "type": "identifier",
+            "named": true
+          }
+        ]
+      },
       "name": {
         "multiple": false,
         "required": true,
@@ -2655,6 +2755,10 @@
           "named": true
         },
         {
+          "type": "block_expression",
+          "named": true
+        },
+        {
           "type": "extension_function_definition",
           "named": true
         },
@@ -2749,6 +2853,10 @@
       "types": [
         {
           "type": "anonymous_parameter",
+          "named": true
+        },
+        {
+          "type": "function_parameter",
           "named": true
         },
         {
@@ -3294,6 +3402,10 @@
     "named": false
   },
   {
+    "type": "getter",
+    "named": false
+  },
+  {
     "type": "hash_gt_comment",
     "named": true,
     "extra": true
@@ -3433,6 +3545,10 @@
   },
   {
     "type": "set",
+    "named": false
+  },
+  {
+    "type": "setter",
     "named": false
   },
   {
