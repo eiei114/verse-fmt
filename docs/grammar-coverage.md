@@ -80,6 +80,8 @@ remaining work) adds it with recorded build results.
 | Named function type, e.g. `type{f(X:int, Y:?int):int}` | supported | `named-function-type` corpus case | `named-function-type` |
 | Parenthesized parameter group with its own `where`, e.g. `Pick((X:t where t:type), Y:t)` | supported | `grouped-where-parameter` corpus case | `grouped-where-parameter` |
 | Access scope value, e.g. `scoped{/Example.org/Thing}` | supported | `scoped-expression` corpus case | `scoped-expression` |
+| Indented `for:` clauses joined across a multi-line block comment | refused (exit 2); the comment's line break does not separate the clauses | `reject-comment-joined-for-clauses` corpus case; guard test | `comment-joined-for-clauses` |
+| A line break, then a comment, then `(`, e.g. `A := F` / `<# note #>(1)` | refused (exit 2); the line break ends `F`, but the scanner reads the opener on the comment's line, so the joined call is not trusted | `reject-opener-after-hidden-line-break` corpus case; guard test | `opener-after-hidden-line-break` |
 | Two statements joined across a multi-line block comment, e.g. `A := 1 <# a` / `#> B := 2` | refused (exit 2); the comment does not separate them, at file scope or inside a block | `reject-comment-joined-statements` and `reject-comment-joined-top-level` corpus cases | `comment-joined-statements` |
 | Statement line starting with unary `+`/`-` after another expression, e.g. `X := A` then `-2 < A` | refused (exit 2); newlines are not separators, so the grammar joins it as a binary operand | `reject-leading-unary-continuation` corpus case; guard regression in both tools | `reject-leading-unary-continuation` |
 | Guard refusal that also contains a raw parse ERROR | refused (exit 2); guard stays primary, the parse error is a secondary failure with its offset and node kind | `tests/diagnostics-stage.rs`, self-authored fixtures | `guard-with-parse-error` |
@@ -109,7 +111,7 @@ regions are reduced to one. Explicit EOL conversion is refused if it would
 change bytes inside a multiline string/comment.
 
 `tests/fixtures/corpus.json` maps the named inputs to independent golden output or
-explicit refusal. Corpus counts: 149 cases total, 121 golden and 28 refusal.
+explicit refusal. Corpus counts: 151 cases total, 121 golden and 30 refusal.
 That split is asserted by `tests/docs-drift.rs`, so no document can quote a
 count the fixture file contradicts. Categories include normal/boundary/rejection
 forms, rather than merely counting whitespace permutations. Calls/index brackets

@@ -114,6 +114,8 @@ fn item_separators(kind: &str) -> Option<&'static [&'static str]> {
         // Condition items may also use `,`, and an item's own `:=` binds its
         // name to its value.
         "if_block_condition" => Some(&[";", ",", ":="]),
+        // Indented `for:` clauses: one per line, or separated by `,`.
+        "for_block_clause_list" => Some(&[","]),
         _ => None,
     }
 }
@@ -203,6 +205,53 @@ fn split_type_annotation(
         .take_while(|t| t.range.start < to)
         .any(|t| t.kind == lex::Kind::Newline)
         .then_some(to)
+}
+
+const HIDDEN_LINE_BREAK_OPENER_MESSAGE: &str = "call or parameter opener follows a line break hidden behind a comment; the line break ends the expression";
+
+/// A `(` that opens a call or a parameter list after a line break. The
+/// scanner only reads such an opener on the callee's line, but a comment
+/// between the line break and the `(` hides that break from it
+/// (`F` then a line break then `<# note #>(1)`), so the tree can join what
+/// the official grammar keeps apart.
+fn opener_after_line_break(
+    node: tree_sitter::Node<'_>,
+    tokens: &[lex::Token],
+    source: &Source,
+) -> Option<usize> {
+    if !matches!(
+        node.kind(),
+        "call_expression"
+            | "function_definition"
+            | "extension_function_definition"
+            | "type_definition"
+            | "generic_type"
+            | "function_parameter"
+    ) {
+        return None;
+    }
+    let mut cursor = node.walk();
+    let mut previous: Option<tree_sitter::Node<'_>> = None;
+    for child in node.children(&mut cursor) {
+        if child.is_extra() {
+            continue;
+        }
+        if child.kind() == "("
+            && let Some(left) = previous
+        {
+            let from = left.end_byte() + source.body_start();
+            let to = child.start_byte() + source.body_start();
+            if tokens[tokens.partition_point(|t| t.range.start < from)..]
+                .iter()
+                .take_while(|t| t.range.start < to)
+                .any(|t| t.kind == lex::Kind::Newline)
+            {
+                return Some(to);
+            }
+        }
+        previous = Some(child);
+    }
+    None
 }
 
 const UNSEPARATED_ITEMS_MESSAGE: &str =
@@ -584,6 +633,11 @@ impl Document {
                 && let Some(start) = split_type_annotation(node, &tokens, source)
             {
                 guard = Some(Failure::guarded(start, SPLIT_TYPE_ANNOTATION_MESSAGE));
+            }
+            if guard.is_none()
+                && let Some(start) = opener_after_line_break(node, &tokens, source)
+            {
+                guard = Some(Failure::guarded(start, HIDDEN_LINE_BREAK_OPENER_MESSAGE));
             }
             if guard.is_none()
                 && let Some(start) = empty_archetype_brace_continuation(node, source)
@@ -1017,6 +1071,33 @@ mod tests {
             let start = text.find("<#").unwrap();
             let end = text.find("#>").unwrap() + 2;
             assert_eq!(comments, [&text[start..end]], "{text}");
+        }
+    }
+
+    #[test]
+    fn a_comment_never_hides_a_line_break_from_a_clause_or_an_opener() {
+        // The newline inside or before the comment is not a separator for the
+        // joined `for` clauses, and the line break before the comment still
+        // ends `F` before a `(` that follows the comment.
+        for (text, message) in [
+            (
+                "F():void =\n    for:\n        X : Xs <# keep\n        comment #> Y : Ys\n    do:\n        Use(X, Y)\n",
+                "ambiguous adjacent statements on one logical line",
+            ),
+            ("A := F\n<# note #>(1)\n", "opener follows a line break"),
+        ] {
+            let source = Source::from_bytes(text.as_bytes()).unwrap();
+            let failure = Document::parse(&source).unwrap_err();
+            assert_eq!(failure.class, Some(Class::Guard), "{text}");
+            assert!(failure.message.contains(message), "{text}: {failure:?}");
+        }
+        for text in [
+            "A := F\n<# note #>\n(1)\n",
+            "A := F <# note #>(1)\n",
+            "F():void =\n    for:\n        X : Xs, <# keep\n        comment #> Y : Ys\n    do:\n        Use(X, Y)\n",
+        ] {
+            let source = Source::from_bytes(text.as_bytes()).unwrap();
+            assert!(Document::parse(&source).is_ok(), "{text}");
         }
     }
 

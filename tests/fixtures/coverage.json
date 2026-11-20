@@ -56,6 +56,8 @@
     {"id": "named-function-type", "source": "handler:=type{f(X:int,Y:?int):int}\nnone:=type{g():void}\n"},
     {"id": "grouped-where-parameter", "source": "Pick((X:t where t:type),Y:t):t=X\n"},
     {"id": "scoped-expression", "source": "Scope:=scoped{/Example.org/Thing}\nBoth:=scoped{/Example.org/A,/Example.org/B}\n"},
+    {"id": "comment-joined-for-clauses", "source": "F():void =\n    for:\n        X : Xs <# keep\n        comment #> Y : Ys\n    do:\n        Use(X, Y)\n"},
+    {"id": "opener-after-hidden-line-break", "source": "A := F\n<# note #>(1)\n"},
     {"id": "comment-joined-statements", "source": "Run():void=\n    if:\n        A:=First[] <# keep\n        note #> B:=Second[]\n    then:\n        Log(\"y\")\n"},
     {"id": "guard-with-parse-error", "source": "First := 1 Second := 2\nBanner:=<p>Plain text</p>\n"},
     {"id": "hash-prefixed-string", "source": "A := \"# text\"\n"},

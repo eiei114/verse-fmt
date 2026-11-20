@@ -11,7 +11,7 @@ UEFN compile and runtime acceptance have not yet been performed. Parser and
 formatter test success must not be presented as UEFN acceptance.
 
 `tests/fixtures/corpus.json` adds named, categorized self-authored cases:
-Corpus counts: 149 cases total, 121 golden and 28 refusal.
+Corpus counts: 151 cases total, 121 golden and 30 refusal.
 A golden case carries an independent expected output; a refusal case is an
 explicit exit 2, so the total is never a count of successes.
 Categories cover encodings,
