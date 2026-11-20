@@ -175,7 +175,7 @@ license are in `vendor/tree-sitter-verse/upstream.md`. Local probe logs under
 
 `tests/fixtures/corpus.json` contains self-authored named cases, with
 malformed input and known unsupported forms clearly categorized.
-Corpus counts: 145 cases total, 117 golden and 28 refusal.
+Corpus counts: 149 cases total, 121 golden and 28 refusal.
 The corpus test invokes the real CLI and rechecks every successful output for
 idempotence, and `tests/docs-drift.rs` fails when any document quotes a different
 count. This is tool coverage, not UEFN acceptance.

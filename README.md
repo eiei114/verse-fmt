@@ -8,7 +8,7 @@ Conservative formatter for Epic Games' Verse language and UEFN projects.
 > but UEFN compiler acceptance, broad-project readiness and distribution checks
 > are still pending. Unsupported syntax fails with exit code 2.
 >
-> Corpus counts: 145 cases total, 117 golden and 28 refusal. A golden case is a
+> Corpus counts: 149 cases total, 121 golden and 28 refusal. A golden case is a
 > successful format; a refusal is an explicit exit 2, not a success. Neither
 > count is UEFN compiler evidence, and `tests/docs-drift.rs` fails when a
 > document quotes any other number.

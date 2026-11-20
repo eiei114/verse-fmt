@@ -112,6 +112,10 @@
         "named": true
       },
       {
+        "type": "scoped_expression",
+        "named": true
+      },
+      {
         "type": "self_expression",
         "named": true
       },
@@ -1064,6 +1068,10 @@
           {
             "type": "indented_block",
             "named": true
+          },
+          {
+            "type": "set_statement",
+            "named": true
           }
         ]
       },
@@ -1448,6 +1456,10 @@
           {
             "type": "indented_block",
             "named": true
+          },
+          {
+            "type": "set_statement",
+            "named": true
           }
         ]
       },
@@ -1564,7 +1576,18 @@
   {
     "type": "function_type",
     "named": true,
-    "fields": {},
+    "fields": {
+      "name": {
+        "multiple": false,
+        "required": false,
+        "types": [
+          {
+            "type": "identifier",
+            "named": true
+          }
+        ]
+      }
+    },
     "children": {
       "multiple": true,
       "required": true,
@@ -2519,6 +2542,26 @@
     }
   },
   {
+    "type": "scoped_expression",
+    "named": true,
+    "fields": {
+      "path": {
+        "multiple": true,
+        "required": true,
+        "types": [
+          {
+            "type": "identifier",
+            "named": true
+          },
+          {
+            "type": "path_literal",
+            "named": true
+          }
+        ]
+      }
+    }
+  },
+  {
     "type": "set_statement",
     "named": true,
     "fields": {
@@ -2869,6 +2912,10 @@
         },
         {
           "type": "tuple_parameter",
+          "named": true
+        },
+        {
+          "type": "where_clause",
           "named": true
         }
       ]
