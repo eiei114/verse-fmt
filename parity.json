@@ -1,0 +1,9 @@
+{
+  "schemaVersion": 1,
+  "contractVersion": 1,
+  "corpusPath": "tests/fixtures/corpus.json",
+  "corpusSha256": "293d69707debea45a143b606e23093d62b5049c60398b76cc818977e52599b21",
+  "goldenCaseCount": 121,
+  "refusalCaseCount": 30,
+  "formatterGrammarBaseRevision": "6b5433e37b52c03c4c07f9468bf7cc11e45f2f82"
+}
