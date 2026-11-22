@@ -11,7 +11,8 @@ Conservative formatter for Epic Games' Verse language and UEFN projects.
 > Corpus counts: 151 cases total, 121 golden and 30 refusal. A golden case is a
 > successful format; a refusal is an explicit exit 2, not a success. Neither
 > count is UEFN compiler evidence, and `tests/docs-drift.rs` fails when a
-> document quotes any other number.
+> document quotes any other number. See [Known limitations](#known-limitations)
+> and the [Release gate](#release-gate).
 
 ## Usage
 
@@ -58,6 +59,69 @@ idempotence. See [parser design](docs/parser-design.md) and
 baseline](docs/performance-baseline-2026-09-23.md) is informational, not a
 release target. See [local packaging and future mise usage](docs/packaging-and-mise.md).
 This is not a compiler.
+
+## Known limitations
+
+Read this before you try the tool on a real project.
+
+- **Unreleased alpha.** There is no stable release, no published crate, no git
+  tag and no GitHub Release. Nothing here is a supported distribution.
+- **No UEFN compiler acceptance has been performed.** Passing tests are
+  parser and formatter tests. They are not evidence that UEFN accepts the
+  input or the output, and they do not show that formatting preserves behavior
+  inside UEFN.
+- **What the corpus result means.** The counts are on the `Corpus counts:` line
+  at the top of this file, and `tests/docs-drift.rs` fails if they drift from
+  `tests/fixtures/corpus.json`. The corpus is self-authored. A golden case
+  shows that one small input formats and stays idempotent; a refusal is an
+  intended exit 2. Neither says that a real UEFN project parses, so the
+  corpus is not a coverage claim about broad projects.
+- **Known unsupported constructs** are refused with exit 2 instead of being
+  guessed at: structural indentation tabs, `<#>` indented comments, markup
+  expressions, quoted or non-ASCII identifiers, multiline string literals
+  outside interpolation, unseparated statements on one line, and a type
+  annotation continued on the next line. Very deep indentation is refused as
+  well. The full table, with the fixture that proves each row, is
+  [`docs/grammar-coverage.md`](docs/grammar-coverage.md); it is the source of
+  truth, and this list is only a pointer into it.
+- **Clean-machine operation is unverified.** Running without Cargo and with only
+  the MSVC runtime has not been checked on a machine that lacks the build tools.
+- **mise installation is documented but untested.** See
+  [packaging and mise](docs/packaging-and-mise.md); no release asset exists for
+  mise to install.
+
+## Release gate
+
+An alpha release is not announced until every item below is true. The two
+groups differ in who can close them.
+
+Verification gates are re-runnable checks that CI or a maintainer can repeat:
+
+- `pwsh -NoProfile -File scripts/verify.ps1` passes on the commit to release.
+- The documentation drift guard (`tests/docs-drift.rs`) passes, so the counts
+  and limits quoted in this repository match the code.
+- The paired convergence check, run from the sibling linter's checkout, passes,
+  so both tools agree on the formatter contract.
+
+Human-owned gates are decisions that CI cannot make and that no workflow in this
+repository performs:
+
+- Real UEFN acceptance: a human-run UEFN build of small and multi-file projects
+  before and after formatting, with the differences reviewed (plan item F08).
+- Distribution readiness: a clean-machine run, checksummed Windows archive, a
+  tested mise install and the release procedure (plan item F09).
+- The decision to tag, release or publish. CI never does any of these.
+
+The F08 and F09 items are in the maintainer's implementation plan, which is not
+part of this repository.
+
+## Related tool
+
+[verse-lint](https://github.com/eiei114/verse-lint) is the sibling linter for
+the same language. The two tools are independent: neither depends on the other
+at runtime, each pins its own grammar snapshot, and they serve different
+purposes (formatting here, diagnostics there). They share a formatter contract
+that is checked at development time only.
 
 ## Development
 
