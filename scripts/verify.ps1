@@ -9,6 +9,9 @@ $saved = @{ Path = $env:Path; RUSTUP_TOOLCHAIN = $env:RUSTUP_TOOLCHAIN; RUSTC = 
 Push-Location (Split-Path -Parent $PSScriptRoot)
 try {
     & "$PSScriptRoot/verify-grammar.ps1"
+    # Corpus or grammar drift must fail here, not only in verse-lint's paired run.
+    pwsh -NoProfile -File "$PSScriptRoot/verify-parity.ps1"
+    if ($LASTEXITCODE -ne 0) { throw 'Parity declaration drifted from the corpus, contract version or grammar base' }
     $match = Select-String -Path rust-toolchain.toml -Pattern '^channel\s*=\s*"([^"]+)"'
     if (-not $match) { throw 'No pinned Rust channel found' }
     $channel = $match.Matches[0].Groups[1].Value
