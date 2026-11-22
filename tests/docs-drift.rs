@@ -1027,10 +1027,28 @@ impl fmt::Display for Handling {
     }
 }
 
+/// The columns of the coverage table, in order. `Form`, `Handling` and `Fixture`
+/// are executed against the binary; the others are checked for presence and shape
+/// so no cell can be left silently blank.
+const COVERAGE_HEADER: [&str; 9] = [
+    "Form",
+    "Handling",
+    "Reference",
+    "Test",
+    "Lossless",
+    "Formatted",
+    "Diagnostic",
+    "UEFN build",
+    "Fixture",
+];
+
 struct Row {
     form: String,
     handling: Handling,
     fixtures: Vec<String>,
+    test: String,
+    diagnostic: String,
+    uefn_build: String,
 }
 
 fn cells(line: &str) -> Vec<&str> {
@@ -1050,8 +1068,8 @@ fn backticked(cell: &str) -> Vec<String> {
 }
 
 /// Parse the checkable part of `docs/grammar-coverage.md`: a table whose columns
-/// are `Form | Handling | Evidence | Fixture`, with one or more fixture IDs per
-/// row. Every row must classify itself as `supported` or `refused`.
+/// are [`COVERAGE_HEADER`], with one or more fixture IDs per row. Every row must
+/// classify itself as `supported` or `refused`, and no cell may be blank.
 fn coverage_rows() -> Vec<Row> {
     let text = read("docs/grammar-coverage.md");
     let mut rows = Vec::new();
@@ -1064,7 +1082,7 @@ fn coverage_rows() -> Vec<Row> {
             continue;
         }
         let columns = cells(line);
-        if columns == ["Form", "Handling", "Evidence", "Fixture"] {
+        if columns == COVERAGE_HEADER {
             in_table = true;
             continue;
         }
@@ -1079,9 +1097,17 @@ fn coverage_rows() -> Vec<Row> {
         }
         assert_eq!(
             columns.len(),
-            4,
-            "docs/grammar-coverage.md row {line:?} must have four columns: Form, Handling, Evidence, Fixture"
+            COVERAGE_HEADER.len(),
+            "docs/grammar-coverage.md row {line:?} must have the columns {COVERAGE_HEADER:?}"
         );
+        for (name, cell) in COVERAGE_HEADER.iter().zip(&columns) {
+            assert!(
+                !cell.is_empty(),
+                "docs/grammar-coverage.md row {:?} leaves the `{name}` column blank; \
+                 state the value, `none recorded`, `no test` or `not verified: <reason>`",
+                columns[0]
+            );
+        }
         let handling = if columns[1].starts_with("supported") {
             Handling::Supported
         } else if columns[1].starts_with("refused") {
@@ -1093,7 +1119,7 @@ fn coverage_rows() -> Vec<Row> {
                 columns[0], columns[1]
             )
         };
-        let fixtures = backticked(columns[3]);
+        let fixtures = backticked(columns[8]);
         assert!(
             !fixtures.is_empty(),
             "docs/grammar-coverage.md row {:?} names no fixture; add its ID from \
@@ -1104,12 +1130,15 @@ fn coverage_rows() -> Vec<Row> {
             form: columns[0].to_owned(),
             handling,
             fixtures,
+            test: columns[3].to_owned(),
+            diagnostic: columns[6].to_owned(),
+            uefn_build: columns[7].to_owned(),
         });
     }
     assert!(
         in_table,
-        "docs/grammar-coverage.md has no `| Form | Handling | Evidence | Fixture |` table; \
-         the guard cannot check its claims"
+        "docs/grammar-coverage.md has no `| {} |` table; the guard cannot check its claims",
+        COVERAGE_HEADER.join(" | ")
     );
     rows
 }
@@ -1230,19 +1259,112 @@ fn every_grammar_coverage_row_matches_the_pinned_build() {
     );
 }
 
+/// The reference build the UEFN-build column is to be verified against.
+const UEFN_REFERENCE_BUILD: &str = "++Fortnite+Release-42.20-CL-58011042-Windows";
+
+/// Whether `fn name` is defined in the file at `path` (relative to the repository).
+fn defines_test(path: &str, name: &str) -> bool {
+    let file = root().join(path);
+    fs::read_to_string(file).is_ok_and(|text| text.contains(&format!("fn {name}(")))
+}
+
+#[test]
+fn every_row_cites_real_tests_or_says_no_test() {
+    let corpus: serde_json::Value = serde_json::from_str(&read("tests/fixtures/corpus.json"))
+        .expect("tests/fixtures/corpus.json must stay parseable");
+    let corpus_ids: BTreeSet<&str> = corpus["cases"]
+        .as_array()
+        .expect("corpus cases")
+        .iter()
+        .filter_map(|case| case["id"].as_str())
+        .collect();
+    for row in coverage_rows() {
+        let cited = backticked(&row.test);
+        if row.test.starts_with("no test") {
+            assert!(
+                cited.is_empty(),
+                "docs/grammar-coverage.md row {:?} says `no test` but also cites {cited:?}",
+                row.form
+            );
+            assert!(
+                matches!(row.handling, Handling::Supported),
+                "docs/grammar-coverage.md row {:?} is refused, so a test must cite the refusal",
+                row.form
+            );
+            continue;
+        }
+        assert!(
+            !cited.is_empty(),
+            "docs/grammar-coverage.md row {:?} has a Test cell {:?} that names no test; \
+             cite one or write `no test`",
+            row.form,
+            row.test
+        );
+        for reference in cited {
+            match reference.split_once("::") {
+                Some((path, name)) => assert!(
+                    defines_test(path, name),
+                    "docs/grammar-coverage.md row {:?} cites {reference:?}, but `fn {name}` \
+                     is not defined in {path}",
+                    row.form
+                ),
+                None => assert!(
+                    corpus_ids.contains(reference.as_str()),
+                    "docs/grammar-coverage.md row {:?} cites corpus case {reference:?}, \
+                     which tests/fixtures/corpus.json does not define",
+                    row.form
+                ),
+            }
+        }
+    }
+}
+
+#[test]
+fn every_refused_row_names_the_guard_that_refuses_it() {
+    for row in coverage_rows() {
+        if matches!(row.handling, Handling::Refused) {
+            assert!(
+                row.diagnostic.contains("`src/") && row.diagnostic.contains("[stage="),
+                "docs/grammar-coverage.md row {:?} is refused but its Diagnostic cell {:?} \
+                 names neither the message stage nor the `src/` code path that refuses it",
+                row.form,
+                row.diagnostic
+            );
+        }
+    }
+}
+
 #[test]
 fn the_grammar_table_records_the_unverified_uefn_column() {
+    for row in coverage_rows() {
+        assert!(
+            row.uefn_build.starts_with("not verified: ") && row.uefn_build.len() > 20,
+            "docs/grammar-coverage.md row {:?} has UEFN build {:?}; until a human-run build \
+             records a result it must read `not verified: <reason>`, and no row may claim \
+             UEFN acceptance",
+            row.form,
+            row.uefn_build
+        );
+    }
     let text = read("docs/grammar-coverage.md");
+    let flat = text.split_whitespace().collect::<Vec<_>>().join(" ");
     assert!(
-        text.contains("UEFN-build column") && text.to_lowercase().contains("unverified"),
+        flat.contains("UEFN-build column is unverified"),
         "docs/grammar-coverage.md must state plainly that the UEFN-build column is \
-         unverified and why, instead of leaving the gap implied"
+         unverified, instead of leaving the gap implied"
     );
     assert!(
-        !text.contains("| UEFN"),
-        "docs/grammar-coverage.md must not present an UEFN column until a human-run \
-         build records real results; the gap is stated in prose on purpose"
+        flat.contains(UEFN_REFERENCE_BUILD) && flat.contains("not yet verified"),
+        "docs/grammar-coverage.md must record {UEFN_REFERENCE_BUILD} as the build to verify \
+         against and mark it not yet verified"
     );
+    for heading in ["Agent-verifiable columns", "Human-gated column"] {
+        assert!(
+            text.contains(heading),
+            "docs/grammar-coverage.md preamble must say which columns are agent-verifiable \
+             and which need a human-run UEFN build: missing {heading:?}"
+        );
+    }
 }
 
 // ------------------------------------------------------------------ README gate
