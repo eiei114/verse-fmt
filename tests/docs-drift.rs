@@ -1244,3 +1244,78 @@ fn the_grammar_table_records_the_unverified_uefn_column() {
          build records real results; the gap is stated in prose on purpose"
     );
 }
+
+// ------------------------------------------------------------------ README gate
+
+/// The README is where a reader asks "does this handle my code?", so the
+/// limitation and release-gate sections it carries are pinned: a rewrite that drops
+/// one, loses the link to the coverage table or the sibling tool, or starts to
+/// claim UEFN acceptance fails here instead of drifting silently. Numbers in those
+/// sections stay covered by the corpus and limit guards above.
+#[test]
+fn the_readme_states_known_limitations_and_the_release_gate() {
+    let text = read("README.md");
+    for heading in ["## Known limitations", "## Release gate", "## Related tool"] {
+        assert!(
+            text.lines().any(|line| line == heading),
+            "README.md lost its `{heading}` section"
+        );
+    }
+    let section = |heading: &str| -> String {
+        text.split(heading)
+            .nth(1)
+            .and_then(|rest| rest.split("\n## ").next())
+            .unwrap_or_else(|| panic!("README.md must carry a `{heading}` section"))
+            .split_whitespace()
+            .collect::<Vec<_>>()
+            .join(" ")
+    };
+    let limitations = section("## Known limitations");
+    let gate = section("## Release gate");
+    for (needle, why) in [
+        (
+            "No UEFN compiler acceptance has been performed",
+            "UEFN acceptance",
+        ),
+        ("Unreleased alpha", "alpha status"),
+        ("docs/grammar-coverage.md", "the coverage table"),
+        (
+            "Clean-machine operation is unverified",
+            "clean-machine status",
+        ),
+        (
+            "mise installation is documented but untested",
+            "mise status",
+        ),
+        ("no git tag", "the absent tag"),
+    ] {
+        assert!(
+            limitations.contains(needle),
+            "README.md Known limitations must state {why} (`{needle}`)"
+        );
+    }
+    for needle in ["Verification gates", "Human-owned gates"] {
+        assert!(
+            gate.contains(needle),
+            "README.md Release gate must separate gates; `{needle}` is missing"
+        );
+    }
+    assert!(
+        text.contains("https://github.com/eiei114/verse-lint") && text.contains("independent"),
+        "README.md must link the sibling linter and state that the tools are independent"
+    );
+    let lowered = text.to_lowercase();
+    for claim in [
+        "accepted by uefn",
+        "uefn acceptance is complete",
+        "uefn acceptance passed",
+        "production ready",
+        "production-ready",
+        "clean-machine verified",
+    ] {
+        assert!(
+            !lowered.contains(claim),
+            "README.md must not claim `{claim}`; no UEFN acceptance has been performed"
+        );
+    }
+}
