@@ -145,6 +145,48 @@ fn show_config_validates_own_keys_but_tolerates_sibling_keys() {
 }
 
 #[test]
+fn show_config_accepts_utf8_bom() {
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path();
+    fs::write(
+        root.join("verse.toml"),
+        b"\xEF\xBB\xBF[format]\nline-ending = 'crlf'\n",
+    )
+    .unwrap();
+
+    let out = run(root, &["--show-config"]);
+    assert_eq!(out.status.code(), Some(0), "{out:?}");
+    let text = String::from_utf8(out.stdout).unwrap();
+    let config: toml::Value = toml::from_str(&text).unwrap();
+    assert_eq!(config["format"]["line-ending"].as_str(), Some("crlf"));
+}
+
+#[test]
+fn invalid_utf8_config_refuses_write_without_changing_source() {
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path();
+    let source = root.join("a.verse");
+    let original = b"A:=1\n";
+    fs::write(&source, original).unwrap();
+    let config = root.join("verse.toml");
+    // A lossy decoder would leave valid TOML because the bad byte is in a comment.
+    fs::write(&config, b"[format]\nline-ending = 'lf' # \xFF\n").unwrap();
+
+    let out = run(root, &["a.verse", "--write"]);
+    assert_eq!(out.status.code(), Some(2), "{out:?}");
+    assert!(out.stdout.is_empty(), "{out:?}");
+    let stderr = String::from_utf8(out.stderr).unwrap();
+    assert!(stderr.contains("configuration must be UTF-8"), "{stderr}");
+    assert_eq!(fs::read(&source).unwrap(), original);
+
+    // With only the encoding repaired, the same invocation must change the file.
+    fs::write(&config, b"[format]\nline-ending = 'lf' # ok\n").unwrap();
+    let out = run(root, &["a.verse", "--write"]);
+    assert_eq!(out.status.code(), Some(0), "{out:?}");
+    assert_eq!(fs::read(&source).unwrap(), b"A := 1\n");
+}
+
+#[test]
 fn stdin_virtual_path_selects_configuration_without_writing() {
     let temp = tempfile::tempdir().unwrap();
     let root = temp.path();
