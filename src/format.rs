@@ -143,7 +143,7 @@ fn layout(
     Ok(output)
 }
 
-fn contains_other_line_ending(text: &str, requested: &str) -> bool {
+pub(crate) fn contains_other_line_ending(text: &str, requested: &str) -> bool {
     let bytes = text.as_bytes();
     bytes.iter().enumerate().any(|(i, byte)| {
         *byte == b'\n'

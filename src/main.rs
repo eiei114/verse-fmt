@@ -490,6 +490,7 @@ fn run(cli: &cli::Cli, machine: &mut Machine) -> Result<u8, String> {
                             &item.label,
                             source,
                             &item.output,
+                            config.settings.format.line_ending,
                             report::color(cli.color, false),
                         )
                         .as_bytes(),
