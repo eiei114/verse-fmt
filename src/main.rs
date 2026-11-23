@@ -121,12 +121,14 @@ impl Machine {
         });
     }
 
-    fn file(&mut self, path: String, status: Status, reason: Option<Reason>) {
+    fn file(&mut self, path: String, status: Status, reason: Option<Reason>) -> usize {
+        let index = self.files.len();
         self.files.push(FileReport {
             path: self.path(&path),
             status,
             reason,
         });
+        index
     }
 
     fn refused(&mut self, failure: &FileFailure) {
@@ -146,14 +148,11 @@ impl Machine {
         self.explain.push(self.sanitize(&failure.explanation()));
     }
 
-    /// Replace the status already recorded for a path. Paths are unique per
-    /// invocation, so no second report entry is ever appended.
-    fn restatus(&mut self, path: &str, status: Status, reason: Option<Reason>) {
-        let path = self.path(path);
-        if let Some(entry) = self.files.iter_mut().find(|entry| entry.path == path) {
-            entry.status = status;
-            entry.reason = reason;
-        }
+    /// Update the source's row by its index: masking can make labels collide.
+    fn restatus(&mut self, index: usize, status: Status, reason: Option<Reason>) {
+        let entry = &mut self.files[index];
+        entry.status = status;
+        entry.reason = reason;
     }
 }
 
@@ -349,12 +348,12 @@ fn run(cli: &cli::Cli, machine: &mut Machine) -> Result<u8, String> {
         ) {
             Ok(item) => {
                 let different = item.snapshot.bytes != item.output.as_bytes();
-                machine.file(
+                let report_index = machine.file(
                     item.label.clone(),
                     status_for(different),
                     different.then(json::change_reason),
                 );
-                analyzed.push(item);
+                analyzed.push((item, report_index));
             }
             Err(failure) => {
                 machine.refused(&failure);
@@ -433,12 +432,12 @@ fn run(cli: &cli::Cli, machine: &mut Machine) -> Result<u8, String> {
             match render(&label, snapshot, &config.settings.format) {
                 Ok(item) => {
                     let different = item.snapshot.bytes != item.output.as_bytes();
-                    machine.file(
+                    let report_index = machine.file(
                         item.label.clone(),
                         status_for(different),
                         different.then(json::change_reason),
                     );
-                    analyzed.push(item);
+                    analyzed.push((item, report_index));
                 }
                 Err(failure) => {
                     machine.refused(&failure);
@@ -455,11 +454,15 @@ fn run(cli: &cli::Cli, machine: &mut Machine) -> Result<u8, String> {
     if cli.write {
         let checked = analyzed.len();
         let mut pending = Vec::new();
-        for item in analyzed {
+        for (item, report_index) in analyzed {
             if item.different {
                 // Stage and lock every changed file before committing any file.
                 match write::prepare(item.snapshot, item.output.as_bytes()) {
-                    Ok(prepared) => pending.push((item.label, prepared)),
+                    Ok(replacement) => pending.push(PendingWrite {
+                        label: item.label,
+                        report_index,
+                        replacement,
+                    }),
                     Err(error) => return Err(write_failure(machine, item.label, &error)),
                 }
             }
@@ -472,7 +475,7 @@ fn run(cli: &cli::Cli, machine: &mut Machine) -> Result<u8, String> {
     let mut changed = false;
     let machine_mode = cli.output_format == cli::OutputFormat::Json;
     let mut stdout = (!machine_mode).then(|| std::io::stdout().lock());
-    for item in analyzed {
+    for (item, _) in analyzed {
         changed |= item.different;
         let Some(stdout) = stdout.as_mut() else {
             continue;
@@ -507,21 +510,32 @@ fn run(cli: &cli::Cli, machine: &mut Machine) -> Result<u8, String> {
     Ok(u8::from(changed && (cli.check || cli.diff)))
 }
 
+struct PendingWrite {
+    label: String,
+    report_index: usize,
+    replacement: write::Pending,
+}
+
 /// Commit every staged replacement in order, promoting each entry to
 /// `formatted` only after its own commit returned success. A batch that stops
 /// midway therefore reports exactly what reached the disk; the files that were
 /// staged but never committed keep `would-format`.
-fn commit_all(machine: &mut Machine, pending: Vec<(String, write::Pending)>) -> Result<(), String> {
+fn commit_all(machine: &mut Machine, pending: Vec<PendingWrite>) -> Result<(), String> {
     commit_all_using(machine, pending, write::Pending::commit)
 }
 
 fn commit_all_using(
     machine: &mut Machine,
-    pending: Vec<(String, write::Pending)>,
+    pending: Vec<PendingWrite>,
     mut commit: impl FnMut(write::Pending) -> Result<Option<String>, String>,
 ) -> Result<(), String> {
-    let planned: Vec<String> = pending.iter().map(|(label, _)| label.clone()).collect();
-    for (index, (label, replacement)) in pending.into_iter().enumerate() {
+    let planned: Vec<String> = pending.iter().map(|item| item.label.clone()).collect();
+    for (index, item) in pending.into_iter().enumerate() {
+        let PendingWrite {
+            label,
+            report_index,
+            replacement,
+        } = item;
         match commit(replacement) {
             Ok(Some(warning)) => eprintln!("{label}: {warning}"),
             Ok(None) => (),
@@ -537,7 +551,7 @@ fn commit_all_using(
                 ));
             }
         }
-        machine.restatus(&label, Status::Formatted, Some(json::change_reason()));
+        machine.restatus(report_index, Status::Formatted, Some(json::change_reason()));
     }
     Ok(())
 }
@@ -623,15 +637,16 @@ mod tests {
         let mut pending = Vec::new();
         for (name, formatted) in [("a.verse", "A := 1\n"), ("b.verse", "B := 2\n")] {
             let snapshot = write::Snapshot::read(&root.path().join(name)).unwrap();
-            pending.push((
-                name.to_owned(),
-                write::prepare(snapshot, formatted.as_bytes()).unwrap(),
-            ));
-            machine.file(
+            let report_index = machine.file(
                 name.to_owned(),
                 Status::WouldFormat,
                 Some(json::change_reason()),
             );
+            pending.push(PendingWrite {
+                label: name.to_owned(),
+                report_index,
+                replacement: write::prepare(snapshot, formatted.as_bytes()).unwrap(),
+            });
         }
 
         let mut commits = 0;
@@ -672,6 +687,68 @@ mod tests {
         assert_eq!(
             std::fs::read(root.path().join("b.verse")).unwrap(),
             b"B:=2\n"
+        );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn commits_update_their_own_rows_when_report_labels_collide() {
+        let root = tempfile::tempdir().unwrap();
+        let mut machine = machine(Path::new(r"C:\project"));
+        let mut pending = Vec::new();
+        let cases = [
+            ("first.verse", "D:/other/x.verse"),
+            ("second.verse", "E:/other/x.verse"),
+            ("third.verse", "F:/other/x.verse"),
+            ("fourth.verse", "G:/other/x.verse"),
+        ];
+        for (name, label) in cases {
+            let path = root.path().join(name);
+            std::fs::write(&path, b"X:=1\n").unwrap();
+            let snapshot = write::Snapshot::read(&path).unwrap();
+            let report_index = machine.file(
+                label.into(),
+                Status::WouldFormat,
+                Some(json::change_reason()),
+            );
+            pending.push(PendingWrite {
+                label: label.into(),
+                report_index,
+                replacement: write::prepare(snapshot, b"X := 1\n").unwrap(),
+            });
+        }
+
+        let mut commits = 0;
+        let error = commit_all_using(&mut machine, pending, |replacement| {
+            commits += 1;
+            if commits == 3 {
+                return Err("injected replacement failure".into());
+            }
+            replacement.commit()
+        })
+        .unwrap_err();
+
+        assert_eq!(commits, 3, "{error}");
+        assert_eq!(machine.files.len(), cases.len());
+        for (index, (name, _)) in cases.into_iter().enumerate() {
+            let row = &machine.files[index];
+            assert_eq!(row.path, "<abs>/other/x.verse");
+            let (status, bytes): (_, &[u8]) = if index < 2 {
+                (Status::Formatted, b"X := 1\n")
+            } else {
+                (Status::WouldFormat, b"X:=1\n")
+            };
+            assert_eq!(row.status, status, "{name}");
+            assert_eq!(
+                std::fs::read(root.path().join(name)).unwrap(),
+                bytes,
+                "{name}"
+            );
+        }
+        assert_eq!(machine.errors.len(), 1);
+        assert_eq!(
+            machine.errors[0].path.as_deref(),
+            Some("<abs>/other/x.verse")
         );
     }
 
