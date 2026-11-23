@@ -1,7 +1,6 @@
 use std::io::IsTerminal;
 
 use crate::cli::Color;
-use crate::format::{LineEnding, contains_other_line_ending};
 
 pub fn color(mode: Color, stderr: bool) -> bool {
     match mode {
@@ -61,7 +60,7 @@ pub fn diff(
     label: &str,
     before: &str,
     after: &str,
-    line_ending: LineEnding,
+    converted_line_endings: bool,
     colored: bool,
 ) -> String {
     let diff = similar::TextDiff::from_lines(before, after);
@@ -71,14 +70,7 @@ pub fn diff(
         .header(&format!("a/{label}"), &format!("b/{label}"))
         .to_string();
     let mut result = String::new();
-    // Compare against the requested style, not just CRLF presence. In preserve
-    // mode, trimming blank lines can remove a style without converting it.
-    let converted = match line_ending {
-        LineEnding::Preserve => false,
-        LineEnding::Lf => contains_other_line_ending(before, "\n"),
-        LineEnding::Crlf => contains_other_line_ending(before, "\r\n"),
-    };
-    if converted {
+    if converted_line_endings {
         result.push_str("# line endings changed (CRLF/LF)\n");
     }
     if colored {

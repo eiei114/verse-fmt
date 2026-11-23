@@ -26,7 +26,12 @@ pub struct Options {
 /// binary always needs the trace that `--explain` prints.
 #[cfg(test)]
 pub fn format(source: &Source, options: &Options) -> Result<String, Failure> {
-    format_traced(source, options, &mut Trace::default())
+    format_traced(source, options, &mut Trace::default()).map(|formatted| formatted.text)
+}
+
+pub struct Formatted {
+    pub text: String,
+    pub converted_line_endings: bool,
 }
 
 /// Format while recording the stages this source actually entered.
@@ -38,7 +43,7 @@ pub fn format_traced(
     source: &Source,
     options: &Options,
     trace: &mut Trace,
-) -> Result<String, Failure> {
+) -> Result<Formatted, Failure> {
     let before = Document::parse_traced(source, trace)?;
     trace.enter(Stage::Structure);
     let indentation = indent::analyze(source, &before.tokens, &before.case_arm_widths)?;
@@ -47,7 +52,7 @@ pub fn format_traced(
     trace.enter(Stage::Validation);
     // The formatter produced these bytes itself, so a decode failure is a
     // validation failure of our own output, never a `source` input failure.
-    let output_source = Source::from_bytes(output.as_bytes())
+    let output_source = Source::from_bytes(output.text.as_bytes())
         .map_err(|e| Failure::new(Stage::Validation, e.offset, e.message))?;
     let after = Document::parse_traced(&output_source, trace)?;
     let after_indentation = indent::analyze(&output_source, &after.tokens, &after.case_arm_widths)?;
@@ -60,7 +65,7 @@ pub fn format_traced(
             "formatting failed token/structure/indentation preservation checks; source was not changed",
         ));
     }
-    if layout(&output_source, &after, &after_indentation, options)? != output {
+    if layout(&output_source, &after, &after_indentation, options)?.text != output.text {
         return Err(Failure::new(
             Stage::Validation,
             0,
@@ -75,13 +80,14 @@ fn layout(
     document: &Document,
     indentation: &indent::Indentation,
     options: &Options,
-) -> Result<String, Failure> {
+) -> Result<Formatted, Failure> {
     let newline = match options.line_ending {
         LineEnding::Preserve => source.newline(),
         LineEnding::Lf => "\n",
         LineEnding::Crlf => "\r\n",
     };
     let mut output = String::with_capacity(source.text().len());
+    let mut converted_line_endings = false;
     let mut skipped = indentation.blank_lines.iter().peekable();
     for (index, token) in document.tokens.iter().enumerate() {
         while skipped.peek().is_some_and(|r| r.end <= token.range.start) {
@@ -96,9 +102,13 @@ fn layout(
         let previous = index.checked_sub(1).map(|i| &document.tokens[i]);
         let next = document.tokens.get(index + 1);
         if token.kind == Kind::Newline {
+            let original = token.text(source);
+            // Only count rewritten terminators on retained lines. Skipped
+            // blank lines and a newly added final newline aren't conversions.
             output.push_str(if options.line_ending == LineEnding::Preserve {
-                token.text(source)
+                original
             } else {
+                converted_line_endings |= original != newline;
                 newline
             });
             continue;
@@ -140,10 +150,13 @@ fn layout(
     if output.len() > source.body_start() && !output.ends_with('\n') {
         output.push_str(newline);
     }
-    Ok(output)
+    Ok(Formatted {
+        text: output,
+        converted_line_endings,
+    })
 }
 
-pub(crate) fn contains_other_line_ending(text: &str, requested: &str) -> bool {
+fn contains_other_line_ending(text: &str, requested: &str) -> bool {
     let bytes = text.as_bytes();
     bytes.iter().enumerate().any(|(i, byte)| {
         *byte == b'\n'

@@ -284,6 +284,7 @@ struct Analyzed {
     snapshot: write::Snapshot,
     output: String,
     different: bool,
+    converted_line_endings: bool,
 }
 
 fn fail<T>(
@@ -490,7 +491,7 @@ fn run(cli: &cli::Cli, machine: &mut Machine) -> Result<u8, String> {
                             &item.label,
                             source,
                             &item.output,
-                            config.settings.format.line_ending,
+                            item.converted_line_endings,
                             report::color(cli.color, false),
                         )
                         .as_bytes(),
@@ -582,7 +583,10 @@ fn render(
             &trace,
         ))
     })?;
-    let output = format::format_traced(&source, options, &mut trace)
+    let format::Formatted {
+        text: output,
+        converted_line_endings,
+    } = format::format_traced(&source, options, &mut trace)
         .map_err(|failure| Box::new(FileFailure::positioned(label, &source, failure, &trace)))?;
     let different = snapshot.bytes != output.as_bytes();
     Ok(Analyzed {
@@ -590,6 +594,7 @@ fn render(
         snapshot,
         output,
         different,
+        converted_line_endings,
     })
 }
 
