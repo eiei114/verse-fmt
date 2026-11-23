@@ -56,7 +56,13 @@ fn enable_virtual_terminal_processing(_stderr: bool) -> bool {
     true
 }
 
-pub fn diff(label: &str, before: &str, after: &str, colored: bool) -> String {
+pub fn diff(
+    label: &str,
+    before: &str,
+    after: &str,
+    converted_line_endings: bool,
+    colored: bool,
+) -> String {
     let diff = similar::TextDiff::from_lines(before, after);
     let rendered = diff
         .unified_diff()
@@ -64,7 +70,7 @@ pub fn diff(label: &str, before: &str, after: &str, colored: bool) -> String {
         .header(&format!("a/{label}"), &format!("b/{label}"))
         .to_string();
     let mut result = String::new();
-    if before.contains("\r\n") != after.contains("\r\n") {
+    if converted_line_endings {
         result.push_str("# line endings changed (CRLF/LF)\n");
     }
     if colored {

@@ -237,6 +237,80 @@ fn diff_is_non_mutating_and_color_is_opt_in_for_redirects() {
 }
 
 #[test]
+fn diff_reports_line_ending_conversions_without_writing() {
+    let cases = [
+        ("crlf", "A := 1\r\nB := 2\n", "A := 1\r\nB := 2\r\n", 1),
+        ("lf", "A := 1\r\nB := 2\n", "A := 1\nB := 2\n", 1),
+        ("crlf", "A := 1\n", "A := 1\r\n", 1),
+        ("lf", "A := 1\r\n", "A := 1\n", 1),
+        ("crlf", "A:=1\r\n", "A := 1\r\n", 0),
+        ("crlf", "A:=1", "A := 1\r\n", 0),
+        (
+            "crlf",
+            "A := 1\r\n\n\r\nB := 2\r\n",
+            "A := 1\r\n\r\nB := 2\r\n",
+            1,
+        ),
+        ("lf", "A := 1\n\n\r\nB := 2\n", "A := 1\n\nB := 2\n", 0),
+        ("preserve", "A:=1\r\nB:=2\n", "A := 1\r\nB := 2\n", 0),
+        (
+            "preserve",
+            "A := 1\r\n\r\n\nB := 2\r\n",
+            "A := 1\r\n\r\nB := 2\r\n",
+            0,
+        ),
+    ];
+    for (policy, input, expected, notes) in cases {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path();
+        put(
+            root,
+            "verse.toml",
+            &format!("[format]\nline-ending='{policy}'\n"),
+        );
+        put(root, "a.verse", input);
+
+        let out = run(root, &["a.verse", "--diff", "--color", "never"]);
+        assert_eq!(out.status.code(), Some(1), "{policy}, {input:?}: {out:?}");
+        let diff = String::from_utf8(out.stdout).unwrap();
+        assert_eq!(
+            diff.lines()
+                .filter(|line| *line == "# line endings changed (CRLF/LF)")
+                .count(),
+            notes,
+            "{policy}, {input:?}: {diff}"
+        );
+        assert_eq!(fs::read(root.join("a.verse")).unwrap(), input.as_bytes());
+
+        let out = run(root, &["a.verse"]);
+        assert_eq!(out.status.code(), Some(0), "{policy}, {input:?}: {out:?}");
+        assert_eq!(out.stdout, expected.as_bytes(), "{policy}, {input:?}");
+    }
+}
+
+#[test]
+fn diff_does_not_report_conversion_when_only_the_lf_blank_line_is_removed() {
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path();
+    put(root, "verse.toml", "[format]\nline-ending = 'crlf'\n");
+    let input = "A := 1\r\n\r\n\nB := 2\r\n";
+    put(root, "sample.verse", input);
+
+    let out = run(root, &["sample.verse", "--diff", "--color", "never"]);
+    assert_eq!(out.status.code(), Some(1), "{out:?}");
+    let diff = String::from_utf8(out.stdout).unwrap();
+    assert!(!diff.contains("# line endings changed (CRLF/LF)"), "{diff}");
+    assert_eq!(
+        fs::read(root.join("sample.verse")).unwrap(),
+        input.as_bytes()
+    );
+
+    let out = run(root, &["sample.verse"]);
+    assert_eq!(out.status.code(), Some(0), "{out:?}");
+    assert_eq!(out.stdout, b"A := 1\r\n\r\nB := 2\r\n");
+}
+
+#[test]
 fn errors_override_differences_and_zero_targets_is_not_success() {
     let temp = tempfile::tempdir().unwrap();
     let root = temp.path();
