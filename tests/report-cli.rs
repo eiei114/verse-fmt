@@ -1,6 +1,11 @@
 //! `--output-format json` contract: envelope shape, status mapping, schema
 //! validity, determinism and the text-path compatibility promise.
-use std::{fs, path::Path, process::Command};
+use std::{
+    fs,
+    io::Write as _,
+    path::Path,
+    process::{Command, Stdio},
+};
 
 fn schema() -> serde_json::Value {
     serde_json::from_str(include_str!("../docs/diagnostics.schema.json")).unwrap()
@@ -136,6 +141,19 @@ fn run(root: &Path, args: &[&str]) -> std::process::Output {
         .args(args)
         .output()
         .unwrap()
+}
+
+fn pipe(root: &Path, args: &[&str], input: &[u8]) -> std::process::Output {
+    let mut child = Command::new(env!("CARGO_BIN_EXE_verse-fmt"))
+        .current_dir(root)
+        .args(args)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    child.stdin.take().unwrap().write_all(input).unwrap();
+    child.wait_with_output().unwrap()
 }
 
 fn put(root: &Path, file: &str, text: &str) {
@@ -460,32 +478,22 @@ fn machine_messages_carry_no_absolute_paths_while_stderr_keeps_them() {
 /// printing the label exactly as given.
 #[test]
 fn an_absolute_stdin_filepath_is_not_reported_as_an_absolute_path() {
-    use std::io::Write as _;
     let temp = tempfile::tempdir().unwrap();
     let root = temp.path();
     let virtual_path = root.join("sub").join("s.verse");
     let virtual_path = virtual_path.to_str().unwrap();
-    let pipe = |args: &[&str]| {
-        let mut child = Command::new(env!("CARGO_BIN_EXE_verse-fmt"))
-            .current_dir(root)
-            .args(args)
-            .stdin(std::process::Stdio::piped())
-            .stdout(std::process::Stdio::piped())
-            .stderr(std::process::Stdio::piped())
-            .spawn()
-            .unwrap();
-        child.stdin.take().unwrap().write_all(b"A:=1\n").unwrap();
-        child.wait_with_output().unwrap()
-    };
-
-    let out = pipe(&[
-        "-",
-        "--stdin-filepath",
-        virtual_path,
-        "--check",
-        "--output-format",
-        "json",
-    ]);
+    let out = pipe(
+        root,
+        &[
+            "-",
+            "--stdin-filepath",
+            virtual_path,
+            "--check",
+            "--output-format",
+            "json",
+        ],
+        b"A:=1\n",
+    );
     assert_eq!(out.status.code(), Some(1), "{out:?}");
     let report = envelope(&out);
     let path = report["files"][0]["path"].as_str().unwrap();
@@ -493,12 +501,35 @@ fn an_absolute_stdin_filepath_is_not_reported_as_an_absolute_path() {
     assert!(path.ends_with("sub/s.verse"), "{report}");
     assert_eq!(report["files"][0]["status"], "would-format", "{report}");
 
-    let text = pipe(&["-", "--stdin-filepath", virtual_path, "--check"]);
+    let text = pipe(
+        root,
+        &["-", "--stdin-filepath", virtual_path, "--check"],
+        b"A:=1\n",
+    );
     assert_eq!(text.status.code(), Some(1), "{text:?}");
     assert_eq!(
         String::from_utf8(text.stdout).unwrap(),
         format!("{}\n", virtual_path.replace('\\', "/"))
     );
+}
+
+#[test]
+fn invalid_utf8_on_stdin_is_reported_as_a_source_refusal() {
+    let temp = tempfile::tempdir().unwrap();
+    let out = pipe(
+        temp.path(),
+        &["-", "--check", "--output-format", "json"],
+        b"A := 1\n\xff",
+    );
+
+    assert_eq!(out.status.code(), Some(2), "{out:?}");
+    // `envelope` parses all stdout as a single JSON value and validates it.
+    let report = envelope(&out);
+    let files = report["files"].as_array().unwrap();
+    assert_eq!(files.len(), 1, "{report}");
+    assert_eq!(files[0]["path"], "<stdin>", "{report}");
+    assert_eq!(files[0]["status"], "refused", "{report}");
+    assert_eq!(files[0]["reason"]["stage"], "source", "{report}");
 }
 
 /// A successful `--write` still reports `formatted` for exactly the files that
