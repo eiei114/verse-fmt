@@ -361,11 +361,15 @@ fn run(cli: &cli::Cli, machine: &mut Machine) -> Result<u8, String> {
             }
         }
     } else {
-        let discovered =
-            match files::discover(&cli.paths, &config.root, &config.settings.files.exclude) {
-                Ok(discovered) => discovered,
-                Err(error) => return fail(machine, Stage::Discovery, None, error),
-            };
+        let discovered = match files::discover(
+            &cli.paths,
+            &config.root,
+            config.source.is_some(),
+            &config.settings.files.exclude,
+        ) {
+            Ok(discovered) => discovered,
+            Err(error) => return fail(machine, Stage::Discovery, None, error),
+        };
         if cli.verbose {
             for excluded in &discovered.excluded {
                 eprintln!("{excluded}");

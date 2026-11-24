@@ -132,11 +132,12 @@ user-global Git ignores are intentionally not loaded. Hidden entries are skipped
 recursively. An explicit file bypasses hidden/gitignore filtering, but never
 config excludes, `.git`, `Intermediate`, `Saved` or `*.digest.verse` protection.
 For inputs inside the invocation root, `Saved` and `Intermediate` are checked
-from the nearest enclosing Git root down (including the Git root itself), or
-from the invocation root when there is no enclosing `.git` marker. This keeps
-generated directories protected when running from a subdirectory of a checkout
-without a `verse.toml`. Inputs outside the invocation root are checked along
-their full path.
+from the config parent down (including the parent itself). Without a config,
+the nearest enclosing `.git` marker establishes that boundary instead. If
+neither exists, or if an input is outside the invocation root, the full path is
+checked so running from inside generated output cannot bypass protection. For
+a standalone project under an unrelated `Saved` or `Intermediate`, put a
+`verse.toml` in the project root to establish the boundary.
 Recursive links/junctions/reparse points are skipped; explicit ones (including
 linked ancestors) are errors. Files are identity-deduplicated and sorted by
 relative forward-slash labels. Missing paths, shell-unexpanded globs and zero
