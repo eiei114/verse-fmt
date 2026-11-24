@@ -80,9 +80,51 @@ pub fn guard_path(path: &Path) -> Result<(), String> {
     Ok(())
 }
 
-fn protected(path: &Path) -> bool {
-    path.components().any(|c| matches!(c, Component::Normal(name) if [".git", "Intermediate", "Saved"].iter().any(|p| name.to_string_lossy().eq_ignore_ascii_case(p))))
-        || path.file_name().is_some_and(|n| n.to_string_lossy().to_ascii_lowercase().ends_with(".digest.verse"))
+fn generated_root(root: &Path, configured: bool) -> Result<Option<&Path>, String> {
+    // An explicit or discovered config establishes the project boundary even
+    // when the project is nested within a larger repository.
+    if configured {
+        return Ok(Some(root));
+    }
+    // Config/label resolution can fall back to CWD deep inside a checkout.
+    // Keep that root for labels and exclusions, but protect generated paths
+    // starting at the enclosing checkout (including .git files in worktrees).
+    for ancestor in root.ancestors() {
+        let marker = ancestor.join(".git");
+        if marker
+            .try_exists()
+            .map_err(|e| format!("{}: {e}", marker.display()))?
+        {
+            return Ok(Some(ancestor));
+        }
+    }
+    // CWD alone cannot distinguish an outer directory named Saved from CWD
+    // inside generated output. Keep the full-path check without a boundary.
+    Ok(None)
+}
+
+fn protected(path: &Path, root: &Path, generated_root: Option<&Path>) -> bool {
+    // Include the project root itself, but not its containing directories.
+    // Inputs outside the invocation root still get the full-path check.
+    let generated_scope = if path.starts_with(root) {
+        generated_root
+            .and_then(Path::parent)
+            .and_then(|parent| path.strip_prefix(parent).ok())
+            .unwrap_or(path)
+    } else {
+        path
+    };
+
+    path.components()
+        .any(|c| matches!(c, Component::Normal(name) if name.eq_ignore_ascii_case(".git")))
+        || generated_scope.components().any(|c| {
+            matches!(c, Component::Normal(name) if name.eq_ignore_ascii_case("Saved") || name.eq_ignore_ascii_case("Intermediate"))
+        })
+        || path.file_name().is_some_and(|n| {
+            n.to_string_lossy()
+                .to_ascii_lowercase()
+                .ends_with(".digest.verse")
+        })
 }
 
 fn hidden(path: &Path, metadata: &fs::Metadata) -> bool {
@@ -134,6 +176,7 @@ pub struct Discovery {
 
 struct Walker<'a> {
     root: &'a Path,
+    generated_root: Option<&'a Path>,
     excludes: GlobSet,
     seen: HashSet<same_file::Handle>,
     visited: usize,
@@ -160,7 +203,7 @@ impl Walker<'_> {
         let mut reason = None;
         if is_link(&metadata) {
             reason = Some("symlink/junction/reparse point");
-        } else if protected(path) {
+        } else if protected(path, self.root, self.generated_root) {
             reason = Some("generated file/directory or Git metadata protection");
         } else if self.excludes.is_match(&shown) {
             reason = Some("verse.toml exclude");
@@ -239,9 +282,15 @@ impl Walker<'_> {
     }
 }
 
-pub fn discover(inputs: &[PathBuf], root: &Path, patterns: &[String]) -> Result<Discovery, String> {
+pub fn discover(
+    inputs: &[PathBuf],
+    root: &Path,
+    configured: bool,
+    patterns: &[String],
+) -> Result<Discovery, String> {
     let mut walker = Walker {
         root,
+        generated_root: generated_root(root, configured)?,
         excludes: excludes(patterns)?,
         seen: HashSet::new(),
         visited: 0,
@@ -306,6 +355,7 @@ mod tests {
     ) -> Walker<'a> {
         Walker {
             root,
+            generated_root: None,
             excludes: GlobSetBuilder::new().build().unwrap(),
             seen: HashSet::new(),
             visited,
@@ -406,7 +456,7 @@ mod tests {
         let before = fs::canonicalize(before).unwrap();
         let after_sibling = fs::canonicalize(after_sibling).unwrap();
         let later_input = fs::canonicalize(later_input).unwrap();
-        let result = discover(&[scan_root, later_input.clone()], root, &[]).unwrap();
+        let result = discover(&[scan_root, later_input.clone()], root, false, &[]).unwrap();
 
         assert!(result.limit_exceeded);
         assert_eq!(result.paths, vec![before]);
