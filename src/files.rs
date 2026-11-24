@@ -80,9 +80,27 @@ pub fn guard_path(path: &Path) -> Result<(), String> {
     Ok(())
 }
 
-fn protected(path: &Path) -> bool {
-    path.components().any(|c| matches!(c, Component::Normal(name) if [".git", "Intermediate", "Saved"].iter().any(|p| name.to_string_lossy().eq_ignore_ascii_case(p))))
-        || path.file_name().is_some_and(|n| n.to_string_lossy().to_ascii_lowercase().ends_with(".digest.verse"))
+fn protected(path: &Path, root: &Path) -> bool {
+    // Ignore the containers of the project, but not the root itself (which
+    // could be a generated directory). Outside the root, keep the full check.
+    let generated_scope = if path.starts_with(root) {
+        root.parent()
+            .and_then(|parent| path.strip_prefix(parent).ok())
+            .unwrap_or(path)
+    } else {
+        path
+    };
+
+    path.components()
+        .any(|c| matches!(c, Component::Normal(name) if name.eq_ignore_ascii_case(".git")))
+        || generated_scope.components().any(|c| {
+            matches!(c, Component::Normal(name) if name.eq_ignore_ascii_case("Saved") || name.eq_ignore_ascii_case("Intermediate"))
+        })
+        || path.file_name().is_some_and(|n| {
+            n.to_string_lossy()
+                .to_ascii_lowercase()
+                .ends_with(".digest.verse")
+        })
 }
 
 fn hidden(path: &Path, metadata: &fs::Metadata) -> bool {
@@ -160,7 +178,7 @@ impl Walker<'_> {
         let mut reason = None;
         if is_link(&metadata) {
             reason = Some("symlink/junction/reparse point");
-        } else if protected(path) {
+        } else if protected(path, self.root) {
             reason = Some("generated file/directory or Git metadata protection");
         } else if self.excludes.is_match(&shown) {
             reason = Some("verse.toml exclude");

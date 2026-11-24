@@ -56,6 +56,54 @@ fn discovers_sorted_unique_sources_with_explanations() {
 }
 
 #[test]
+fn project_beneath_generated_names_still_protects_its_own_generated_content() {
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path().join("Saved/Intermediate/Project");
+    put(&root, "src/ordinary.verse", "A:=1\n");
+    let protected = [
+        ("Saved", "Saved/nested/auto.verse"),
+        ("Intermediate", "Intermediate/nested/auto.verse"),
+        (".git", ".git/nested/auto.verse"),
+        ("Api.digest.verse", "Api.digest.verse"),
+    ];
+    for (_, file) in protected {
+        put(&root, file, "invalid!");
+    }
+
+    let out = run(&root, &[".", "--check", "--verbose"]);
+    assert_eq!(out.status.code(), Some(1), "{out:?}");
+    assert_eq!(
+        String::from_utf8(out.stdout).unwrap().replace('\r', ""),
+        "src/ordinary.verse\n"
+    );
+    let log = String::from_utf8(out.stderr).unwrap();
+    for (entry, file) in protected {
+        assert!(
+            log.contains(&format!(
+                "{entry}: excluded (generated file/directory or Git metadata protection)"
+            )),
+            "{log}"
+        );
+        let out = run(&root, &[file, "--check"]);
+        assert_eq!(out.status.code(), Some(2), "{file}: {out:?}");
+        assert!(out.stdout.is_empty(), "{file}: {out:?}");
+        assert!(
+            String::from_utf8_lossy(&out.stderr).contains(&format!(
+                "{file}: excluded (generated file/directory or Git metadata protection)"
+            )),
+            "{file}: {out:?}"
+        );
+    }
+
+    let out = run(&root, &["src/ordinary.verse", "--check"]);
+    assert_eq!(out.status.code(), Some(1), "{out:?}");
+    assert_eq!(
+        String::from_utf8(out.stdout).unwrap().replace('\r', ""),
+        "src/ordinary.verse\n"
+    );
+}
+
+#[test]
 fn explicit_files_override_gitignore_but_not_protected_or_config_excludes() {
     let temp = tempfile::tempdir().unwrap();
     let root = temp.path();
