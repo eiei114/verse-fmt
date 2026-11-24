@@ -104,6 +104,39 @@ fn project_beneath_generated_names_still_protects_its_own_generated_content() {
 }
 
 #[test]
+fn generated_files_are_refused_from_nested_cwd_without_config() {
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path().join("Saved/Intermediate/Project");
+    fs::create_dir_all(root.join(".git")).unwrap();
+    put(&root, "src/ordinary.verse", "A:=1\n");
+
+    let out = run(&root.join("src"), &[".", "--check"]);
+    assert_eq!(out.status.code(), Some(1), "{out:?}");
+    assert_eq!(out.stdout, b"ordinary.verse\n");
+
+    for generated in ["Saved", "Intermediate"] {
+        let cwd = root.join(generated).join("nested");
+        let original = "A:=1\n";
+        put(&cwd, "auto.verse", original);
+        for mode in ["--check", "--write"] {
+            let out = run(&cwd, &["auto.verse", mode]);
+            assert_eq!(out.status.code(), Some(2), "{generated} {mode}: {out:?}");
+            assert!(out.stdout.is_empty(), "{generated} {mode}: {out:?}");
+            assert!(
+                String::from_utf8_lossy(&out.stderr).contains(
+                    "auto.verse: excluded (generated file/directory or Git metadata protection)"
+                ),
+                "{generated} {mode}: {out:?}"
+            );
+            assert_eq!(
+                fs::read(cwd.join("auto.verse")).unwrap(),
+                original.as_bytes()
+            );
+        }
+    }
+}
+
+#[test]
 fn explicit_files_override_gitignore_but_not_protected_or_config_excludes() {
     let temp = tempfile::tempdir().unwrap();
     let root = temp.path();

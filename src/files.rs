@@ -80,11 +80,28 @@ pub fn guard_path(path: &Path) -> Result<(), String> {
     Ok(())
 }
 
-fn protected(path: &Path, root: &Path) -> bool {
-    // Ignore the containers of the project, but not the root itself (which
-    // could be a generated directory). Outside the root, keep the full check.
+fn generated_root(root: &Path) -> Result<&Path, String> {
+    // Config/label resolution can fall back to CWD deep inside a checkout.
+    // Keep that root for labels and exclusions, but protect generated paths
+    // starting at the enclosing checkout (including .git files in worktrees).
+    for ancestor in root.ancestors() {
+        let marker = ancestor.join(".git");
+        if marker
+            .try_exists()
+            .map_err(|e| format!("{}: {e}", marker.display()))?
+        {
+            return Ok(ancestor);
+        }
+    }
+    Ok(root)
+}
+
+fn protected(path: &Path, root: &Path, generated_root: &Path) -> bool {
+    // Include the project root itself, but not its containing directories.
+    // Inputs outside the invocation root still get the full-path check.
     let generated_scope = if path.starts_with(root) {
-        root.parent()
+        generated_root
+            .parent()
             .and_then(|parent| path.strip_prefix(parent).ok())
             .unwrap_or(path)
     } else {
@@ -152,6 +169,7 @@ pub struct Discovery {
 
 struct Walker<'a> {
     root: &'a Path,
+    generated_root: &'a Path,
     excludes: GlobSet,
     seen: HashSet<same_file::Handle>,
     visited: usize,
@@ -178,7 +196,7 @@ impl Walker<'_> {
         let mut reason = None;
         if is_link(&metadata) {
             reason = Some("symlink/junction/reparse point");
-        } else if protected(path, self.root) {
+        } else if protected(path, self.root, self.generated_root) {
             reason = Some("generated file/directory or Git metadata protection");
         } else if self.excludes.is_match(&shown) {
             reason = Some("verse.toml exclude");
@@ -260,6 +278,7 @@ impl Walker<'_> {
 pub fn discover(inputs: &[PathBuf], root: &Path, patterns: &[String]) -> Result<Discovery, String> {
     let mut walker = Walker {
         root,
+        generated_root: generated_root(root)?,
         excludes: excludes(patterns)?,
         seen: HashSet::new(),
         visited: 0,
@@ -324,6 +343,7 @@ mod tests {
     ) -> Walker<'a> {
         Walker {
             root,
+            generated_root: root,
             excludes: GlobSetBuilder::new().build().unwrap(),
             seen: HashSet::new(),
             visited,
